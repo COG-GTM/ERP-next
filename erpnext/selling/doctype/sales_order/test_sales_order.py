@@ -2757,6 +2757,57 @@ class TestSalesOrder(ERPNextTestSuite):
 		so = make_sales_order(item_code=fg_item, qty=10, rate=50, warehouse=fg_warehouse, do_not_save=1)
 		self.assertRaises(frappe.ValidationError, so.save)
 
+	def test_check_modified_date_uses_parameterized_sql(self):
+		"""Regression: check_modified_date must not f-string interpolate into SQL.
+
+		CWE-89 / NIST 800-53 SI-10 / DISA STIG V-220632. If the TIMEDIFF query is
+		ever rebuilt with f-string concatenation of ``self.modified`` (which can be
+		reached through frappe.client.save / set_value payloads at low privilege),
+		a malicious payload like ``1' OR 1=1; -- `` would break out of the quoted
+		literal. This test asserts the call site uses parameter binding: two
+		positional args to ``frappe.db.sql`` — the first a string template with
+		``%s`` placeholders and no ``self.modified`` / ``mod_db`` interpolated
+		literal, the second a tuple/list of bound values.
+
+		Uses a stand-in object rather than a real Sales Order document so this
+		test runs without touching the database.
+		"""
+		from types import SimpleNamespace
+
+		from erpnext.selling.doctype.sales_order.sales_order import SalesOrder
+
+		malicious = "1' OR 1=1; -- "
+		so = SimpleNamespace(
+			name="SO-SQLI-REGRESSION",
+			doctype="Sales Order",
+			modified=malicious,
+		)
+
+		with patch("frappe.db.get_value", return_value="2024-01-01 00:00:00") as mock_get_value, patch(
+			"frappe.db.sql", return_value=[(None,)]
+		) as mock_sql:
+			SalesOrder.check_modified_date(so)
+
+		mock_get_value.assert_called_once_with("Sales Order", so.name, "modified")
+		self.assertEqual(mock_sql.call_count, 1)
+
+		args, kwargs = mock_sql.call_args
+		self.assertGreaterEqual(len(args), 1, "frappe.db.sql must be called with a query string")
+		query = args[0]
+		values = args[1] if len(args) > 1 else kwargs.get("values")
+
+		# The query must be a static string with %s placeholders — NOT an
+		# f-string that inlined the malicious payload.
+		self.assertIsInstance(query, str)
+		self.assertIn("%s", query, "query must use %s parameter binding, not f-string interpolation")
+		self.assertNotIn(malicious, query, "malicious payload must not appear in the query string")
+		self.assertNotIn("OR 1=1", query)
+
+		# Bound values must be passed out-of-band as a tuple/list.
+		self.assertIsNotNone(values, "frappe.db.sql must receive bound values separately from the query")
+		self.assertIsInstance(values, (tuple, list))
+		self.assertIn(malicious, values, "self.modified payload must be passed as a bound parameter")
+
 
 def compare_payment_schedules(doc, doc1, doc2):
 	for index, schedule in enumerate(doc1.get("payment_schedule")):
