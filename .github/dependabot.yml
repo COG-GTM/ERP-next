@@ -1,0 +1,13 @@
+version: 2
+updates:
+  # Keep GitHub Actions (including SHA-pinned external actions in
+  # .github/workflows/*.yml) up to date. Dependabot opens weekly PRs that
+  # refresh both the pinned SHA and the adjacent `# vN` comment.
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github_actions"
