@@ -1,10 +1,16 @@
+import unittest
+from typing import ClassVar
+
 import frappe
 from frappe import qb
 from frappe.utils import add_days, flt, getdate, today
 
 from erpnext.accounts.doctype.payment_entry.payment_entry import get_payment_entry
 from erpnext.accounts.doctype.sales_invoice.test_sales_invoice import create_sales_invoice
-from erpnext.accounts.report.accounts_receivable.accounts_receivable import execute
+from erpnext.accounts.report.accounts_receivable.accounts_receivable import (
+	ReceivablePayableReport,
+	execute,
+)
 from erpnext.accounts.test.accounts_mixin import AccountsTestMixin
 from erpnext.selling.doctype.sales_order.test_sales_order import make_sales_order
 from erpnext.tests.utils import ERPNextTestSuite
@@ -1243,3 +1249,59 @@ class TestAccountsReceivable(ERPNextTestSuite, AccountsTestMixin):
 		self.assertEqual(len(report[1]), 1)
 		row = report[1][0]
 		self.assertEqual([si.name, project.name, 60], [row.voucher_no, row.project, row.outstanding])
+
+
+class TestAgeingBuckets(unittest.TestCase):
+	"""
+	Bucket boundary regression tests for ``ReceivablePayableReport.get_ageing_data``.
+
+	The default ageing ranges ``[30, 60, 90, 120]`` produce five buckets:
+	``range1`` 0-30, ``range2`` 30-60, ``range3`` 60-90, ``range4`` 90-120,
+	``range5`` 120+. Each upper bound is inclusive: an invoice that is
+	exactly 30 days old must land in ``range1``, not ``range2``.
+	"""
+
+	AGE_AS_ON = getdate("2026-01-01")
+	RANGES: ClassVar[list[str]] = ["30", "60", "90", "120"]
+
+	def _make_report(self):
+		report = ReceivablePayableReport.__new__(ReceivablePayableReport)
+		report.age_as_on = self.AGE_AS_ON
+		report.ranges = list(self.RANGES)
+		report.range_numbers = list(range(1, len(self.RANGES) + 2))
+		return report
+
+	def _bucket_for_age(self, age_days):
+		report = self._make_report()
+		entry_date = add_days(self.AGE_AS_ON, -age_days)
+		row = frappe._dict(outstanding=100.0)
+		report.get_ageing_data(entry_date, row)
+		populated = [i for i in report.range_numbers if flt(row.get(f"range{i}")) == 100.0]
+		self.assertEqual(
+			len(populated),
+			1,
+			f"age={age_days} populated multiple buckets: {populated}",
+		)
+		return populated[0]
+
+	def test_bucket_assignment_at_boundaries(self):
+		# (age_in_days, expected range index) — upper bound of each bucket is inclusive.
+		cases = [
+			(0, 1),
+			(29, 1),
+			(30, 1),
+			(31, 2),
+			(59, 2),
+			(60, 2),
+			(61, 3),
+			(89, 3),
+			(90, 3),
+			(91, 4),
+			(119, 4),
+			(120, 4),
+			(121, 5),
+			(365, 5),
+		]
+		for age_days, expected in cases:
+			with self.subTest(age_days=age_days):
+				self.assertEqual(self._bucket_for_age(age_days), expected)

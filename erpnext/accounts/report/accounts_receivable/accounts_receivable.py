@@ -902,7 +902,7 @@ class ReceivablePayableReport:
 		row.age = (getdate(self.age_as_on) - getdate(entry_date)).days or 0
 
 		index = next(
-			(i for i, days in enumerate(self.ranges) if cint(row.age) < cint(days)), len(self.ranges)
+			(i for i, days in enumerate(self.ranges) if cint(row.age) <= cint(days)), len(self.ranges)
 		)
 		row["range" + str(index + 1)] = row.outstanding
 

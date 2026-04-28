@@ -162,5 +162,5 @@ jobs:
         with:
           name: MariaDB
           token: ${{ secrets.CODECOV_TOKEN }}
-          fail_ci_if_error: true
+          fail_ci_if_error: ${{ secrets.CODECOV_TOKEN != '' }}
           verbose: true
