@@ -18,7 +18,10 @@ mkdir frappe
 pushd frappe
 git init
 git remote add origin "https://github.com/${frappeuser}/frappe"
-git fetch origin "${frappecommitish}" --depth 1
+if ! git fetch origin "${frappecommitish}" --depth 1; then
+    echo "Branch '${frappecommitish}' not found on ${frappeuser}/frappe — falling back to 'develop'"
+    git fetch origin develop --depth 1
+fi
 git checkout FETCH_HEAD
 popd
 
