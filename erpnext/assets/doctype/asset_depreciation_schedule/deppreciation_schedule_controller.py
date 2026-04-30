@@ -366,7 +366,7 @@ class DepreciationScheduleController(StraightLineMethod, WDVMethod):
 		Adjust depreciation amount in the last period based on the expected value after useful life
 		"""
 		if (
-			row_idx == cint(self.final_number_of_depreciations)
+			row_idx == cint(self.final_number_of_depreciations) - 1
 			and flt(self.pending_depreciation_amount) != flt(self.fb_row.expected_value_after_useful_life)
 		) or flt(self.pending_depreciation_amount) < flt(self.fb_row.expected_value_after_useful_life):
 			self.depreciation_amount += flt(self.pending_depreciation_amount) - flt(
