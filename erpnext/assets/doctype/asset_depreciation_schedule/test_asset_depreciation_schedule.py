@@ -1157,3 +1157,34 @@ class TestAssetDepreciationSchedule(ERPNextTestSuite):
 			for d in get_depr_schedule(asset.name, "Active")
 		]
 		self.assertEqual(schedules, expected_depreciation_after_repair)
+
+	def test_adjust_depr_amount_for_salvage_value_last_period_true_up(self):
+		"""
+		Regression test for the last-period salvage-value true-up.
+
+		Constructs a 3-period schedule where, after period 2, the pending
+		net book value has drifted to 100.05 against a configured salvage
+		value of 100. On the final row (row_idx == final_number_of_depreciations - 1)
+		the controller must add the residual 0.05 to that row's
+		depreciation_amount and set skip_row, so the schedule lands exactly
+		on salvage value with no residual NBV stranded on the books.
+		"""
+		from types import SimpleNamespace
+
+		from erpnext.assets.doctype.asset_depreciation_schedule.deppreciation_schedule_controller import (
+			DepreciationScheduleController,
+		)
+
+		stub = SimpleNamespace(
+			final_number_of_depreciations=3,
+			pending_depreciation_amount=100.05,
+			fb_row=SimpleNamespace(expected_value_after_useful_life=100.0),
+			depreciation_amount=300.0,
+			skip_row=False,
+			precision=lambda field: 2,
+		)
+
+		DepreciationScheduleController.adjust_depr_amount_for_salvage_value(stub, row_idx=2)
+
+		self.assertEqual(stub.depreciation_amount, 300.05)
+		self.assertTrue(stub.skip_row)
