@@ -43,7 +43,15 @@ SEED = [
 ]
 
 
-def setup(seed_transactions=True):
+def setup(seed_transactions=True, company=None):
+	"""Seed the DEMO wallet data. Pass ``company`` to attach everything to an existing company
+	(for example the Iraq public-finance demo company) instead of creating ``DEMO - Public Finance Co``."""
+	global COMPANY, COMPANY_ABBR
+	if company:
+		if not frappe.db.exists("Company", company):
+			frappe.throw(f"Company {company} does not exist")
+		COMPANY = company
+		COMPANY_ABBR = frappe.db.get_value("Company", company, "abbr")
 	company = ensure_company()
 	ensure_settings(company)
 	ensure_customer()
