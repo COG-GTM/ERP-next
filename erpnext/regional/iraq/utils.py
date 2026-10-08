@@ -127,31 +127,39 @@ def _allocate_tax_row(doc, tax, details):
 
 	`_item_wise_tax_details` stores amounts in *company* currency, rounded to the base precision, so
 	dividing them by the conversion rate cannot recover the transaction amount (e.g. a USD-based
-	company invoicing IQD). Instead estimate each row in the transaction currency - exactly for
-	"On Net Total" (`net_amount * rate / 100`), otherwise converted from the base detail - and then
-	scale the estimates with running-total rounding so they sum to the tax row's transaction-currency
-	`tax_amount_after_discount_amount` (sign-adjusted for "Deduct" rows).
+	company invoicing IQD). Instead weight each row in the transaction currency the same way the tax
+	controller computes it (`net_amount * rate` for On Net Total / Actual, `qty * rate` for On Item
+	Quantity, converted detail for On Previous Row ...) and scale the weights with running-total
+	rounding so they sum to the tax row's transaction-currency `tax_amount_after_discount_amount`
+	(sign-adjusted for "Deduct" rows; zero when a Grand Total discount wiped the tax out).
 	"""
 	conversion_rate = flt(doc.get("conversion_rate")) or 1.0
 	multiplier = -1 if tax.get("add_deduct_tax") == "Deduct" else 1
 	precision = details[0].item.precision("tax_amount")
+	charge_type = tax.get("charge_type")
 
-	estimates = []
+	weights = []
 	for detail in details:
-		if tax.get("charge_type") == "On Net Total":
-			estimate = multiplier * flt(detail.item.net_amount) * flt(detail.rate) / 100.0
+		if charge_type == "On Item Quantity":
+			weight = multiplier * flt(detail.item.qty) * flt(detail.rate)
+		elif charge_type in ("On Net Total", "Actual"):
+			weight = multiplier * flt(detail.item.net_amount) * (flt(detail.rate) or 1.0)
 		else:
-			estimate = flt(detail.amount) / conversion_rate
-		estimates.append(estimate)
+			weight = flt(detail.amount) / conversion_rate
+		weights.append(weight)
 
-	target = multiplier * flt(tax.get("tax_amount_after_discount_amount") or tax.get("tax_amount"))
-	estimated_total = sum(estimates)
-	factor = target / estimated_total if estimated_total else 0.0
+	target = multiplier * flt(tax.get("tax_amount_after_discount_amount"))
+	weight_total = sum(weights)
+	if not weight_total and target:
+		# rounded base details carry no usable weight (tiny foreign-currency charge): spread by net amount
+		weights = [flt(detail.item.net_amount) or 1.0 for detail in details]
+		weight_total = sum(weights)
+	factor = target / weight_total if weight_total else 1.0
 
-	running_estimate = running_allocated = 0.0
-	for detail, estimate in zip(details, estimates, strict=True):
-		running_estimate += estimate
-		allocated_so_far = flt(running_estimate * factor, precision)
+	running_weight = running_allocated = 0.0
+	for detail, weight in zip(details, weights, strict=True):
+		running_weight += weight
+		allocated_so_far = flt(running_weight * factor, precision)
 		yield id(detail.item), flt(detail.rate), allocated_so_far - running_allocated
 		running_allocated = allocated_so_far
 
