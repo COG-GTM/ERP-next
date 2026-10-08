@@ -385,9 +385,11 @@ doc_events = {
 		"validate": [
 			"erpnext.regional.united_arab_emirates.utils.update_grand_total_for_rcm",
 			"erpnext.regional.united_arab_emirates.utils.validate_returns",
+			"erpnext.accounts.public_finance.budget_control.validate_purchase_invoice_budget",
 		]
 	},
 	"Payment Entry": {
+		"validate": "erpnext.accounts.public_finance.budget_control.validate_payment_entry_budget",
 		"on_trash": "erpnext.regional.check_deletion_permission",
 	},
 	"Address": {
