@@ -194,33 +194,39 @@ def load_demo_budget_data(company, fiscal_year):
 		if budget:
 			summary.budgets.append(budget)
 
-	if not demo_vouchers_exist("Purchase Order", company, supplier, fy):
-		for ministry, _arabic, amount in DEMO_MINISTRIES:
-			share = DEMO_COMMITMENTS.get(ministry)
-			if not share:
-				continue
-			po = make_demo_purchase_order(
-				company, supplier, item, expense_account, cost_center, ministry, posting_date, amount * share
-			)
-			summary.purchase_orders.append(po.name)
-			if ministry in DEMO_BILLED_COMMITMENTS:
-				pi = bill_demo_purchase_order(po, posting_date)
-				summary.purchase_invoices.append(pi.name)
+	ministry_field = get_dimension_fieldname("Ministry")
+	governorate_field = get_dimension_fieldname("Governorate")
 
-	if not demo_vouchers_exist("Purchase Invoice", company, supplier, fy, exclude_po_linked=True):
-		for ministry, _arabic, amount in DEMO_MINISTRIES:
-			share = DEMO_ACTUALS.get(ministry)
-			if not share:
-				continue
-			pi = make_demo_purchase_invoice(
-				company, supplier, item, expense_account, cost_center, ministry, posting_date, amount * share
-			)
+	for ministry, _arabic, amount in DEMO_MINISTRIES:
+		share = DEMO_COMMITMENTS.get(ministry)
+		if not share or demo_vouchers_exist(
+			"Purchase Order", company, supplier, fy, {ministry_field: ministry}
+		):
+			continue
+		po = make_demo_purchase_order(
+			company, supplier, item, expense_account, cost_center, ministry, posting_date, amount * share
+		)
+		summary.purchase_orders.append(po.name)
+		if ministry in DEMO_BILLED_COMMITMENTS:
+			pi = bill_demo_purchase_order(po, posting_date)
 			summary.purchase_invoices.append(pi.name)
 
-	if not demo_payment_entries_exist(company, customer, fy):
-		for governorate, amount in DEMO_COLLECTIONS.items():
-			pe = make_demo_collection(company, customer, governorate, posting_date, amount)
-			summary.payment_entries.append(pe.name)
+	for ministry, _arabic, amount in DEMO_MINISTRIES:
+		share = DEMO_ACTUALS.get(ministry)
+		if not share or demo_vouchers_exist(
+			"Purchase Invoice", company, supplier, fy, {ministry_field: ministry}, exclude_po_linked=True
+		):
+			continue
+		pi = make_demo_purchase_invoice(
+			company, supplier, item, expense_account, cost_center, ministry, posting_date, amount * share
+		)
+		summary.purchase_invoices.append(pi.name)
+
+	for governorate, amount in DEMO_COLLECTIONS.items():
+		if demo_payment_entries_exist(company, customer, fy, {governorate_field: governorate}):
+			continue
+		pe = make_demo_collection(company, customer, governorate, posting_date, amount)
+		summary.payment_entries.append(pe.name)
 
 	return summary
 
@@ -363,8 +369,9 @@ def ensure_demo_budget(company, fiscal_year, ministry, account, amount, governor
 	return budget.name
 
 
-def demo_vouchers_exist(doctype, company, supplier, fy, exclude_po_linked=False):
+def demo_vouchers_exist(doctype, company, supplier, fy, extra_filters=None, exclude_po_linked=False):
 	filters = {
+		**(extra_filters or {}),
 		"company": company,
 		"supplier": supplier,
 		"docstatus": 1,
@@ -386,11 +393,12 @@ def demo_vouchers_exist(doctype, company, supplier, fy, exclude_po_linked=False)
 	return True
 
 
-def demo_payment_entries_exist(company, customer, fy):
+def demo_payment_entries_exist(company, customer, fy, extra_filters=None):
 	return bool(
 		frappe.db.exists(
 			"Payment Entry",
 			{
+				**(extra_filters or {}),
 				"company": company,
 				"party_type": "Customer",
 				"party": customer,

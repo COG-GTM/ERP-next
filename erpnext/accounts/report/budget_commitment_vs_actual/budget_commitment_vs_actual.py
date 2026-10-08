@@ -36,10 +36,34 @@ def get_columns(filters):
 			"options": "Account",
 			"width": 220,
 		},
-		{"fieldname": "budget", "label": _("Budget"), "fieldtype": "Currency", "width": 140},
-		{"fieldname": "committed", "label": _("Committed"), "fieldtype": "Currency", "width": 140},
-		{"fieldname": "actual", "label": _("Actual"), "fieldtype": "Currency", "width": 140},
-		{"fieldname": "available", "label": _("Available"), "fieldtype": "Currency", "width": 140},
+		{
+			"fieldname": "budget",
+			"label": _("Budget"),
+			"fieldtype": "Currency",
+			"options": "currency",
+			"width": 140,
+		},
+		{
+			"fieldname": "committed",
+			"label": _("Committed"),
+			"fieldtype": "Currency",
+			"options": "currency",
+			"width": 140,
+		},
+		{
+			"fieldname": "actual",
+			"label": _("Actual"),
+			"fieldtype": "Currency",
+			"options": "currency",
+			"width": 140,
+		},
+		{
+			"fieldname": "available",
+			"label": _("Available"),
+			"fieldtype": "Currency",
+			"options": "currency",
+			"width": 140,
+		},
 		{"fieldname": "percent_consumed", "label": _("% Consumed"), "fieldtype": "Percent", "width": 120},
 	]
 
@@ -59,4 +83,5 @@ def get_chart(filters, data):
 		},
 		"type": "bar",
 		"fieldtype": "Currency",
+		"options": "currency",
 	}

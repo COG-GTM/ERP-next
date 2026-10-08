@@ -19,7 +19,7 @@ invoices are skipped because the invoice already consumed the budget.
 import frappe
 from frappe import _, qb
 from frappe.query_builder.functions import IfNull, Sum
-from frappe.utils import flt, fmt_money, getdate
+from frappe.utils import escape_html, flt, fmt_money, getdate
 
 from erpnext.accounts.utils import get_fiscal_year
 
@@ -60,7 +60,6 @@ def get_fiscal_year_dates(fiscal_year):
 	return frappe.db.get_value("Fiscal Year", fiscal_year, ["year_start_date", "year_end_date"])
 
 
-@frappe.whitelist()
 def get_commitment_vs_actual(filters: dict | str | None):
 	"""
 	Return one row per (dimension value, account) with budget, committed, actual, available and
@@ -90,6 +89,7 @@ def get_commitment_vs_actual(filters: dict | str | None):
 	if filters.dimension_value:
 		keys = {k for k in keys if k[0] == filters.dimension_value}
 
+	currency = frappe.get_cached_value("Company", filters.company, "default_currency")
 	arabic_field = get_arabic_name_field(filters.dimension)
 	arabic_names = {}
 	if arabic_field and keys:
@@ -119,6 +119,7 @@ def get_commitment_vs_actual(filters: dict | str | None):
 				actual=actual_amt,
 				available=budget - consumed,
 				percent_consumed=(consumed / budget * 100.0) if budget else None,
+				currency=currency,
 			)
 		)
 	return rows
@@ -154,7 +155,9 @@ def get_committed_amounts(filters, fieldname, fy_start, fy_end):
 		.select(
 			poi[fieldname],
 			poi.expense_account,
-			Sum(IfNull(poi.amount, 0) - IfNull(poi.billed_amt, 0)).as_("amount"),
+			Sum((IfNull(poi.amount, 0) - IfNull(poi.billed_amt, 0)) * IfNull(po.conversion_rate, 1)).as_(
+				"amount"
+			),
 		)
 		.where(
 			(po.docstatus == 1)
@@ -197,7 +200,12 @@ def get_actual_amounts(filters, fieldname, fy_start, fy_end):
 
 def roll_up_tree(dimension, budgets, amounts):
 	"""For tree dimensions, add descendants' amounts to budget rows held at group nodes."""
-	group_nodes = {k[0] for k in budgets} - {k[0] for k in amounts}
+	budgeted = {k[0] for k in budgets}
+	if not budgeted:
+		return amounts
+	group_nodes = set(
+		frappe.get_all(dimension, filters={"name": ("in", list(budgeted)), "is_group": 1}, pluck="name")
+	)
 	if not group_nodes:
 		return amounts
 	nodes = frappe.get_all(
@@ -211,9 +219,11 @@ def roll_up_tree(dimension, budgets, amounts):
 		lft, rgt = bounds.get(group, (None, None))
 		if lft is None:
 			continue
-		for (leaf, account), amount in amounts.items():
-			leaf_lft, leaf_rgt = bounds.get(leaf, (None, None))
-			if leaf_lft is not None and lft <= leaf_lft and leaf_rgt <= rgt:
+		for (node, account), amount in amounts.items():
+			if node == group:
+				continue
+			node_lft, node_rgt = bounds.get(node, (None, None))
+			if node_lft is not None and lft < node_lft and node_rgt < rgt:
 				rolled[(group, account)] = flt(rolled.get((group, account))) + amount
 	return rolled
 
@@ -246,8 +256,16 @@ def validate_purchase_invoice_budget(doc, method=None):
 				continue
 			key = (dim.document_type, value, item.expense_account)
 			requested[key] = flt(requested.get(key)) + flt(item.base_net_amount)
-			if item.get("purchase_order"):
-				already_committed[key] = flt(already_committed.get(key)) + flt(item.base_net_amount)
+			if item.get("po_detail"):
+				po_item = frappe.db.get_value(
+					"Purchase Order Item", item.po_detail, [dim.fieldname, "expense_account"], as_dict=True
+				)
+				if (
+					po_item
+					and po_item.get(dim.fieldname) == value
+					and po_item.expense_account == item.expense_account
+				):
+					already_committed[key] = flt(already_committed.get(key)) + flt(item.base_net_amount)
 
 	for (dimension, value, account), amount in requested.items():
 		rows = get_commitment_vs_actual(
@@ -262,18 +280,49 @@ def validate_purchase_invoice_budget(doc, method=None):
 		row = next((r for r in rows if r.dimension == value and r.account == account), None)
 		if not row or not row.budget:
 			continue
-		committed = row.committed - flt(already_committed.get((dimension, value, account)))
+		committed = max(row.committed - flt(already_committed.get((dimension, value, account))), 0.0)
 		raise_if_exceeded(doc.company, dimension, value, row, committed, amount)
+
+
+def get_direct_disbursement(pe):
+	"""Part of a supplier payment not allocated against a Purchase Invoice (company currency)."""
+	allocated_to_invoices = sum(
+		flt(ref.allocated_amount)
+		for ref in (pe.get("references") or [])
+		if ref.reference_doctype == "Purchase Invoice"
+	)
+	rate = flt(pe.base_paid_amount) / flt(pe.paid_amount) if flt(pe.paid_amount) else 1.0
+	return max(flt(pe.base_paid_amount) - allocated_to_invoices * rate, 0.0)
+
+
+def get_prior_direct_disbursements(company, fieldname, value, fiscal_year, exclude=None):
+	fy_start, fy_end = get_fiscal_year_dates(fiscal_year)
+	names = frappe.get_all(
+		"Payment Entry",
+		filters={
+			"company": company,
+			"docstatus": 1,
+			"payment_type": "Pay",
+			"party_type": "Supplier",
+			fieldname: value,
+			"posting_date": ("between", [fy_start, fy_end]),
+			"name": ("!=", exclude or ""),
+		},
+		pluck="name",
+	)
+	return sum(get_direct_disbursement(frappe.get_doc("Payment Entry", name)) for name in names)
 
 
 def validate_payment_entry_budget(doc, method=None):
 	"""
-	DEMO ASSUMPTION: a supplier payment tagged with a public-finance dimension and not allocated to any
-	invoice is a direct disbursement checked against the dimension's total available budget.
+	DEMO ASSUMPTION: the part of a supplier payment that is not allocated against a Purchase Invoice is a
+	direct disbursement; together with earlier direct disbursements for the same dimension it is checked
+	against the dimension's total available budget (committed + actual + disbursed + requested <= budget).
 	"""
 	if doc.docstatus != 1 or doc.payment_type != "Pay" or doc.party_type != "Supplier":
 		return
-	if doc.get("references"):
+	requested = get_direct_disbursement(doc)
+	if requested <= 0:
 		return
 	dimensions = get_public_finance_dimensions()
 	if not dimensions:
@@ -301,8 +350,9 @@ def validate_payment_entry_budget(doc, method=None):
 		)
 		if not total.budget:
 			continue
+		disbursed = get_prior_direct_disbursements(doc.company, dim.fieldname, value, fiscal_year, doc.name)
 		raise_if_exceeded(
-			doc.company, dim.document_type, value, total, total.committed, flt(doc.base_paid_amount)
+			doc.company, dim.document_type, value, total, total.committed + disbursed, requested
 		)
 
 
@@ -314,7 +364,8 @@ def raise_if_exceeded(company, dimension, value, row, committed, requested):
 	currency = frappe.get_cached_value("Company", company, "default_currency")
 	money = lambda amount: fmt_money(amount, currency=currency)  # noqa: E731
 	available = flt(row.budget) - consumed
-	arabic_value = row.get("dimension_name_in_arabic") or value
+	value = escape_html(value)
+	arabic_value = escape_html(row.get("dimension_name_in_arabic") or value)
 	dimension_ar = DIMENSION_LABELS_AR.get(dimension, dimension)
 
 	message_en = _(

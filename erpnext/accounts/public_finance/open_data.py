@@ -76,6 +76,7 @@ def rows_to_json(meta, rows):
 def export_budget_vs_actual(
 	company: str, fiscal_year: str, dimension: str, fmt: str = "csv", account: str | None = None
 ):
+	frappe.has_permission("Budget", "read", throw=True)
 	fmt = (fmt or "csv").lower()
 	if fmt not in ("csv", "json"):
 		frappe.throw(_("Format must be csv or json"))
