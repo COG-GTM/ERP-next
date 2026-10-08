@@ -322,6 +322,49 @@ class TestDemoWallet(ERPNextTestSuite):
 		self.assertFalse(transaction.payment_entry)
 		self.assertEqual(frappe.db.get_value("Payment Request", pr.name, "status"), "Failed")
 
+		# a failed attempt is final: a later signed "success" for the same payment id is a replay
+		body = self.callback_body(transaction)
+		result = api.process_callback(body, self.signed(body))
+		self.assertEqual(result, {"payment_id": transaction.name, "status": "Failed", "replayed": True})
+		transaction.reload()
+		self.assertFalse(transaction.payment_entry)
+
+	def test_create_payment_rejects_foreign_payment_request(self):
+		si, pr = self.make_payment_request()
+		settings = frappe.get_single("Demo Wallet Settings")
+		claims = api.require_bearer_token(settings, api.issue_access_token(settings)["access_token"])
+		frappe.db.set_value("Payment Request", pr.name, "payment_gateway", None)
+		self.assertRaises(
+			frappe.ValidationError,
+			api.create_transaction,
+			settings,
+			claims,
+			amount=pr.grand_total,
+			currency=pr.currency,
+			reference_doctype="Payment Request",
+			reference_docname=pr.name,
+		)
+
+	def test_partial_refunds_accumulate(self):
+		si, pr = self.make_payment_request()
+		transaction = self.get_transaction(pr)
+		self.pay(transaction)
+		first = api.refund_transaction(transaction, amount=40, reason="DEMO partial")
+		self.assertEqual(first.status, "Paid")
+		self.assertEqual(flt(first.refund_amount), 40)
+		self.assertRaises(frappe.ValidationError, api.refund_transaction, transaction, 61, "DEMO too much")
+		first_refund_id = first.refund_id
+		second = api.refund_transaction(transaction, amount=60, reason="DEMO rest")
+		self.assertEqual(second.status, "Refunded")
+		self.assertEqual(flt(second.refund_amount), 100)
+		self.assertEqual(
+			frappe.db.count(
+				"Payment Entry",
+				{"reference_no": ("in", [first_refund_id, second.refund_id]), "docstatus": 1},
+			),
+			2,
+		)
+
 	def test_second_capture_for_same_payment_request_is_refused(self):
 		si, pr = self.make_payment_request()
 		transaction = self.get_transaction(pr)

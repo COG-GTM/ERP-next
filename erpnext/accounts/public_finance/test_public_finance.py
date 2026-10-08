@@ -10,6 +10,7 @@ from erpnext.accounts.doctype.payment_entry.test_payment_entry import create_pay
 from erpnext.accounts.public_finance.budget_control import (
 	PublicFinanceBudgetExceededError,
 	get_commitment_vs_actual,
+	roll_up_tree,
 )
 from erpnext.accounts.public_finance.open_data import (
 	DEMO_DISCLAIMER,
@@ -174,6 +175,28 @@ class TestPublicFinance(ERPNextTestSuite):
 		with self.assertRaises(PublicFinanceBudgetExceededError) as ctx:
 			make_pe(25_000)
 		self.assertIn("تم تجاوز الميزانية", str(ctx.exception))
+
+		# earlier unallocated disbursements count as consumed: 30k invoice + 10k paid = 40k of 50k
+		self.assertRaises(PublicFinanceBudgetExceededError, make_pe, 15_000)
+		self.assertEqual(make_pe(10_000).docstatus, 1)
+
+	def test_roll_up_tree_keeps_parent_direct_amounts(self):
+		parent = frappe.db.get_value("Cost Center", COST_CENTER, "parent_cost_center")
+		rolled = roll_up_tree(
+			"Cost Center",
+			{(parent, ACCOUNT): 100},
+			{(parent, ACCOUNT): 20, (COST_CENTER, ACCOUNT): 90},
+		)
+		self.assertAlmostEqual(rolled[(parent, ACCOUNT)], 110)
+		self.assertAlmostEqual(rolled[(COST_CENTER, ACCOUNT)], 90)
+
+	def test_budget_data_requires_budget_permission(self):
+		filters = {"company": COMPANY, "fiscal_year": self.fiscal_year, "dimension": "Ministry"}
+		with self.set_user("test@example.com"):
+			self.assertRaises(frappe.PermissionError, get_commitment_vs_actual, filters)
+			self.assertRaises(
+				frappe.PermissionError, export_budget_vs_actual, COMPANY, self.fiscal_year, "Ministry"
+			)
 
 	def test_open_data_export_csv_and_json(self):
 		self.make_budget(100_000)

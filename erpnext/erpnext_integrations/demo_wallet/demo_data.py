@@ -5,8 +5,9 @@
 
 	bench --site <site> execute erpnext.erpnext_integrations.demo_wallet.demo_data.setup
 
-Creates (idempotently) a DEMO company in IQD, a DEMO customer and item, enables the gateway with
-DEMO credentials, and seeds Demo Wallet Transactions in every reconciliation state so the
+Creates (idempotently) a DEMO company in IQD, a DEMO customer and item, enables the gateway with a
+fixed DEMO client id and random per-site secrets (never published; presenters fetch a token from
+Demo Wallet Settings), and seeds Demo Wallet Transactions in every reconciliation state so the
 ``Demo Wallet Reconciliation`` report has mixed data. Nothing here refers to a real organisation.
 """
 
@@ -16,6 +17,9 @@ from frappe.utils import flt
 
 from erpnext.accounts.doctype.payment_request.payment_request import make_payment_request
 from erpnext.erpnext_integrations.demo_wallet import api
+from erpnext.erpnext_integrations.doctype.demo_wallet_settings.demo_wallet_settings import (
+	SUPPORTED_CURRENCIES,
+)
 
 # DEMO ASSUMPTION: all names below are fictitious placeholders (EN / AR) for a public-finance demo.
 COMPANY = "DEMO - Public Finance Co"
@@ -28,8 +32,6 @@ TERRITORY = "DEMO - Baghdad / بغداد"
 ITEM = "DEMO - Service Fee / تجريبي - رسم خدمة"
 ITEM_GROUP = "DEMO - Fees"
 DEMO_CLIENT_ID = "demo-merchant"
-DEMO_CLIENT_SECRET = "demo-client-secret-not-real"
-DEMO_HMAC_SECRET = "demo-hmac-secret-not-real"
 
 # (amount in IQD, reconciliation state to seed)
 SEED = [
@@ -46,12 +48,18 @@ SEED = [
 def setup(seed_transactions=True, company=None):
 	"""Seed the DEMO wallet data. Pass ``company`` to attach everything to an existing company
 	(for example the Iraq public-finance demo company) instead of creating ``DEMO - Public Finance Co``."""
-	global COMPANY, COMPANY_ABBR
+	global COMPANY, COMPANY_ABBR, CURRENCY
 	if company:
 		if not frappe.db.exists("Company", company):
 			frappe.throw(f"Company {company} does not exist")
 		COMPANY = company
-		COMPANY_ABBR = frappe.db.get_value("Company", company, "abbr")
+		COMPANY_ABBR, CURRENCY = frappe.db.get_value("Company", company, ["abbr", "default_currency"])
+		if CURRENCY not in SUPPORTED_CURRENCIES:
+			frappe.throw(
+				_("Demo Wallet demo data needs a company in {0}; {1} uses {2}").format(
+					", ".join(SUPPORTED_CURRENCIES), company, CURRENCY
+				)
+			)
 	company = ensure_company()
 	ensure_settings(company)
 	ensure_customer()
@@ -109,8 +117,8 @@ def ensure_settings(company):
 			"enabled": 1,
 			"company": company,
 			"client_id": DEMO_CLIENT_ID,
-			"client_secret": DEMO_CLIENT_SECRET,
-			"hmac_secret": DEMO_HMAC_SECRET,
+			"client_secret": frappe.generate_hash(length=32),
+			"hmac_secret": frappe.generate_hash(length=48),
 			"token_ttl_seconds": 300,
 		}
 	)

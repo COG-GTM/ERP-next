@@ -25,6 +25,7 @@ from frappe.model.document import Document
 from frappe.utils import cint, flt, get_url, now_datetime, nowdate
 
 from erpnext.erpnext_integrations.demo_wallet import gateway
+from erpnext.erpnext_integrations.doctype.demo_wallet_settings.demo_wallet_settings import GATEWAY_NAME
 
 SIGNATURE_HEADER = "X-Demo-Wallet-Signature"
 TOKEN_HEADER = "X-Demo-Wallet-Token"
@@ -35,7 +36,8 @@ SUCCESS_PATH = "/payment-success"
 FAILED_PATH = "/payment-failed"
 SETTINGS_DOCTYPE = "Demo Wallet Settings"
 TRANSACTION_DOCTYPE = "Demo Wallet Transaction"
-FINAL_STATUSES = ("Paid", "Refunded")
+# a failed attempt is final too: a later "success" for the same payment id is a replay, not a capture
+FINAL_STATUSES = ("Paid", "Failed", "Refunded")
 
 
 def get_settings():
@@ -186,13 +188,31 @@ def create_transaction(settings, claims: dict, **kwargs):
 	payment_request = frappe.db.get_value(
 		"Payment Request",
 		kwargs.get("reference_docname"),
-		["name", "company", "reference_doctype", "reference_name", "grand_total", "currency", "docstatus"],
+		[
+			"name",
+			"company",
+			"reference_doctype",
+			"reference_name",
+			"grand_total",
+			"currency",
+			"docstatus",
+			"payment_gateway",
+		],
 		as_dict=True,
 	)
 	if not payment_request or payment_request.docstatus == 2:
 		frappe.throw(
 			_("Payment Request {0} not found").format(kwargs.get("reference_docname")),
 			frappe.DoesNotExistError,
+		)
+	if payment_request.payment_gateway != GATEWAY_NAME or (
+		settings.company and payment_request.company != settings.company
+	):
+		frappe.throw(
+			_("Payment Request {0} is not a Demo Wallet payment request of company {1}").format(
+				payment_request.name, settings.company
+			),
+			frappe.ValidationError,
 		)
 	if payment_request.currency != currency or flt(payment_request.grand_total) != amount:
 		frappe.throw(_("Amount or currency does not match Payment Request {0}").format(payment_request.name))
@@ -402,11 +422,13 @@ def refund_transaction(transaction, amount=None, reason: str | None = None):
 			_("Only paid Demo Wallet payments can be refunded (status is {0})").format(transaction.status)
 		)
 
-	refund_amount = flt(amount) if amount not in (None, "") else flt(transaction.amount)
-	if refund_amount <= 0 or refund_amount > flt(transaction.amount):
+	# partial refunds accumulate; the payment stays Paid until the whole amount has been returned
+	remaining = flt(transaction.amount) - flt(transaction.refund_amount)
+	refund_amount = flt(amount) if amount not in (None, "") else remaining
+	if refund_amount <= 0 or refund_amount > remaining + 0.0005:
 		frappe.throw(
 			_("Refund amount must be greater than 0 and at most {0} {1}").format(
-				transaction.amount, transaction.currency
+				remaining, transaction.currency
 			)
 		)
 
@@ -414,11 +436,12 @@ def refund_transaction(transaction, amount=None, reason: str | None = None):
 	with _as_administrator():
 		refund_entry = create_refund_payment_entry(transaction, refund_amount, refund_id, reason)
 
+	total_refunded = flt(transaction.refund_amount) + refund_amount
 	transaction.db_set(
 		{
-			"status": "Refunded",
+			"status": "Refunded" if total_refunded >= flt(transaction.amount) - 0.0005 else "Paid",
 			"refund_id": refund_id,
-			"refund_amount": refund_amount,
+			"refund_amount": total_refunded,
 			"refund_reason": reason,
 			"refunded_on": now_datetime(),
 			"refund_payment_entry": refund_entry.name if refund_entry else None,
@@ -442,14 +465,17 @@ def create_refund_payment_entry(transaction, refund_amount: float, refund_id: st
 		)
 
 	original = frappe.get_doc("Payment Entry", transaction.payment_entry)
-	# transaction.amount is in the Payment Request / gateway bank-account currency (= paid_to on the
-	# receipt); the receivable side (paid_from) may be in another currency, so scale each side separately
-	gateway_side = (
-		original.received_amount
-		if original.paid_to_account_currency == transaction.currency
-		else original.paid_amount
-	)
-	fraction = refund_amount / flt(gateway_side) if flt(gateway_side) else 1
+	# transaction.amount is in the Payment Request currency, which is the gateway bank account's
+	# (= paid_to on the receipt) currency; refuse anything else rather than guess a conversion
+	if original.paid_to_account_currency != transaction.currency or not flt(original.received_amount):
+		frappe.throw(
+			_("Cannot refund Demo Wallet payment {0}: receipt currency {1} does not match {2}").format(
+				transaction.name, original.paid_to_account_currency, transaction.currency
+			),
+			frappe.ValidationError,
+		)
+	# both legs are reversed in the same proportion at the original exchange rate
+	fraction = refund_amount / flt(original.received_amount)
 	precision = original.precision("paid_amount")
 
 	refund_entry = frappe.new_doc("Payment Entry")

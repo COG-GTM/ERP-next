@@ -4,12 +4,12 @@
 import frappe
 from frappe import _
 
-from erpnext.accounts.public_finance.budget_control import get_commitment_vs_actual
+from erpnext.accounts.public_finance.budget_control import compute_commitment_vs_actual
 
 
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
-	data = get_commitment_vs_actual(filters)
+	data = compute_commitment_vs_actual(filters)
 	return get_columns(filters), data, None, get_chart(filters, data)
 
 

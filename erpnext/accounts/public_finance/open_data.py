@@ -10,7 +10,10 @@ from frappe import _
 from frappe.utils import flt, now_datetime
 from frappe.utils.csvutils import to_csv
 
-from erpnext.accounts.public_finance.budget_control import get_commitment_vs_actual
+from erpnext.accounts.public_finance.budget_control import (
+	check_budget_read_permission,
+	compute_commitment_vs_actual,
+)
 
 DEMO_DISCLAIMER = "DEMO data - not official figures. / بيانات تجريبية - ليست أرقاماً رسمية."
 
@@ -29,7 +32,7 @@ EXPORT_COLUMNS = [
 
 
 def build_export(company, fiscal_year, dimension, account=None):
-	rows = get_commitment_vs_actual(
+	rows = compute_commitment_vs_actual(
 		{"company": company, "fiscal_year": fiscal_year, "dimension": dimension, "account": account}
 	)
 	meta = {
@@ -79,6 +82,7 @@ def export_budget_vs_actual(
 	fmt = (fmt or "csv").lower()
 	if fmt not in ("csv", "json"):
 		frappe.throw(_("Format must be csv or json"))
+	check_budget_read_permission(company)
 
 	meta, rows = build_export(company, fiscal_year, dimension, account)
 	slug = frappe.scrub(f"{company} {fiscal_year} {dimension}")

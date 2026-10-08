@@ -12,8 +12,9 @@ Available  = Budget - Committed - Actual.
 
 DEMO ASSUMPTION (no public spec): a supplier Payment Entry tagged with a Ministry / Governorate and
 not allocated against any invoice is treated as a direct disbursement and is checked against the
-total available budget of that dimension across all budgeted accounts. Payments allocated against
-invoices are skipped because the invoice already consumed the budget.
+total available budget of that dimension across all budgeted accounts (earlier, still-unallocated
+disbursements count as consumed). Payments allocated against invoices are skipped because the invoice
+already consumed the budget.
 """
 
 import frappe
@@ -60,8 +61,28 @@ def get_fiscal_year_dates(fiscal_year):
 	return frappe.db.get_value("Fiscal Year", fiscal_year, ["year_start_date", "year_end_date"])
 
 
+def check_budget_read_permission(company):
+	"""Whitelisted entry points query Budget / GL figures directly, so enforce the equivalent
+	Budget read + Company permission that the standard Budget report would require."""
+	if not frappe.has_permission("Budget", "read") or not frappe.has_permission("Company", doc=company):
+		frappe.throw(
+			_("Not permitted to read budget data for company {0}").format(company), frappe.PermissionError
+		)
+
+
 @frappe.whitelist()
 def get_commitment_vs_actual(filters: dict | str | None):
+	"""Permission-checked entry point (Desk / API). Server-side callers use
+	``compute_commitment_vs_actual`` so budget enforcement does not depend on the submitter's
+	Budget permissions."""
+	if isinstance(filters, str):
+		filters = frappe.parse_json(filters)
+	filters = frappe._dict(filters or {})
+	check_budget_read_permission(filters.company)
+	return compute_commitment_vs_actual(filters)
+
+
+def compute_commitment_vs_actual(filters: dict | str | None):
 	"""
 	Return one row per (dimension value, account) with budget, committed, actual, available and
 	percent_consumed. ``filters``: company, fiscal_year, dimension (Ministry / Governorate /
@@ -154,7 +175,10 @@ def get_committed_amounts(filters, fieldname, fy_start, fy_end):
 		.select(
 			poi[fieldname],
 			poi.expense_account,
-			Sum(IfNull(poi.amount, 0) - IfNull(poi.billed_amt, 0)).as_("amount"),
+			# PO item amounts are in the order currency; budgets and GL are in company currency
+			Sum((IfNull(poi.amount, 0) - IfNull(poi.billed_amt, 0)) * IfNull(po.conversion_rate, 1)).as_(
+				"amount"
+			),
 		)
 		.where(
 			(po.docstatus == 1)
@@ -196,26 +220,63 @@ def get_actual_amounts(filters, fieldname, fy_start, fy_end):
 
 
 def roll_up_tree(dimension, budgets, amounts):
-	"""For tree dimensions, add descendants' amounts to budget rows held at group nodes."""
-	group_nodes = {k[0] for k in budgets} - {k[0] for k in amounts}
-	if not group_nodes:
+	"""For tree dimensions, add strict descendants' amounts to every budgeted node. A budgeted node's
+	own direct activity is already in ``amounts`` and is kept."""
+	budgeted_nodes = {k[0] for k in budgets}
+	if not budgeted_nodes:
 		return amounts
 	nodes = frappe.get_all(
 		dimension,
-		filters={"name": ("in", list(group_nodes | {k[0] for k in amounts}))},
+		filters={"name": ("in", list(budgeted_nodes | {k[0] for k in amounts}))},
 		fields=["name", "lft", "rgt"],
 	)
 	bounds = {n.name: (n.lft, n.rgt) for n in nodes}
 	rolled = dict(amounts)
-	for group in group_nodes:
+	for group in budgeted_nodes:
 		lft, rgt = bounds.get(group, (None, None))
 		if lft is None:
 			continue
 		for (leaf, account), amount in amounts.items():
+			if leaf == group:
+				continue
 			leaf_lft, leaf_rgt = bounds.get(leaf, (None, None))
-			if leaf_lft is not None and lft <= leaf_lft and leaf_rgt <= rgt:
+			if leaf_lft is not None and lft < leaf_lft and leaf_rgt < rgt:
 				rolled[(group, account)] = flt(rolled.get((group, account))) + amount
 	return rolled
+
+
+def get_remaining_po_commitment(po_detail):
+	"""Unbilled commitment (company currency) still held by one Purchase Order Item."""
+	row = frappe.db.get_value(
+		"Purchase Order Item", po_detail, ["amount", "billed_amt", "parent"], as_dict=True
+	)
+	if not row:
+		return 0.0
+	rate = frappe.db.get_value("Purchase Order", row.parent, "conversion_rate") or 1
+	return max(0.0, (flt(row.amount) - flt(row.billed_amt)) * flt(rate))
+
+
+def get_direct_disbursements(company, fieldname, value, fy_start, fy_end, exclude=None):
+	"""Submitted supplier payments tagged with the dimension that are still not allocated to any
+	invoice, in company currency. ``unallocated_amount`` falls as a payment is reconciled later, so
+	the same money is never counted both here and through the invoice's GL actuals."""
+	pe = qb.DocType("Payment Entry")
+	query = (
+		qb.from_(pe)
+		.select(Sum(pe.unallocated_amount * pe.source_exchange_rate))
+		.where(
+			(pe.docstatus == 1)
+			& (pe.company == company)
+			& (pe.payment_type == "Pay")
+			& (pe.party_type == "Supplier")
+			& (pe.posting_date[fy_start:fy_end])
+			& (pe[fieldname] == value)
+			& (pe.unallocated_amount > 0)
+		)
+	)
+	if exclude:
+		query = query.where(pe.name != exclude)
+	return flt(query.run()[0][0])
 
 
 def get_public_finance_dimensions():
@@ -246,11 +307,13 @@ def validate_purchase_invoice_budget(doc, method=None):
 				continue
 			key = (dim.document_type, value, item.expense_account)
 			requested[key] = flt(requested.get(key)) + flt(item.base_net_amount)
-			if item.get("purchase_order"):
-				already_committed[key] = flt(already_committed.get(key)) + flt(item.base_net_amount)
+			if item.get("po_detail"):
+				# only the commitment this PO line still holds is released by billing it
+				released = min(flt(item.base_net_amount), get_remaining_po_commitment(item.po_detail))
+				already_committed[key] = flt(already_committed.get(key)) + released
 
 	for (dimension, value, account), amount in requested.items():
-		rows = get_commitment_vs_actual(
+		rows = compute_commitment_vs_actual(
 			{
 				"company": doc.company,
 				"fiscal_year": fiscal_year,
@@ -280,11 +343,12 @@ def validate_payment_entry_budget(doc, method=None):
 		return
 
 	fiscal_year = get_fiscal_year(doc.posting_date, company=doc.company)[0]
+	fy_start, fy_end = get_fiscal_year_dates(fiscal_year)
 	for dim in dimensions:
 		value = doc.get(dim.fieldname)
 		if not value:
 			continue
-		rows = get_commitment_vs_actual(
+		rows = compute_commitment_vs_actual(
 			{
 				"company": doc.company,
 				"fiscal_year": fiscal_year,
@@ -301,8 +365,16 @@ def validate_payment_entry_budget(doc, method=None):
 		)
 		if not total.budget:
 			continue
+		disbursed = get_direct_disbursements(
+			doc.company, dim.fieldname, value, fy_start, fy_end, exclude=doc.name
+		)
 		raise_if_exceeded(
-			doc.company, dim.document_type, value, total, total.committed, flt(doc.base_paid_amount)
+			doc.company,
+			dim.document_type,
+			value,
+			total,
+			total.committed + disbursed,
+			flt(doc.base_paid_amount),
 		)
 
 
