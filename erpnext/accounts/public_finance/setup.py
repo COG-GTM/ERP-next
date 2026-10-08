@@ -118,8 +118,21 @@ def setup_public_finance_dimensions(company=None):
 		if ensure_master("Governorate", "governorate_name", name, arabic):
 			created["governorates"].append(name)
 
+	show_accounting_dimension_sections()
 	frappe.clear_cache()
 	return created
+
+
+def show_accounting_dimension_sections():
+	"""ERPNext hides the Accounting Dimensions section on vouchers while Accounts Settings >
+	Enable Accounting Dimensions is off; the demo needs the Ministry/Governorate fields visible."""
+	from erpnext.accounts.doctype.accounts_settings.accounts_settings import (
+		toggle_accounting_dimension_sections,
+	)
+
+	if not frappe.db.get_single_value("Accounts Settings", "enable_accounting_dimensions"):
+		frappe.db.set_single_value("Accounts Settings", "enable_accounting_dimensions", 1)
+	toggle_accounting_dimension_sections(hide=False)
 
 
 def ensure_accounting_dimension(dimension_name, document_type, fieldname):
