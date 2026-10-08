@@ -81,7 +81,7 @@
 			{% elif not gateway_enabled %}
 			<div class="alert alert-secondary mb-0">The Demo Wallet gateway is disabled. / بوابة المحفظة التجريبية معطّلة.</div>
 			{% else %}
-			<div class="alert alert-secondary mb-0">This demo payment is already <strong>{{ status }}</strong>. / تمت معالجة هذا الدفع التجريبي بالفعل.</div>
+			<div class="alert alert-secondary mb-0">This demo payment is already <strong>{{ status }}</strong>. / تمت معالجة هذا الدفع التجريبي بالفعل.{% if status == "Failed" %} To retry, ask the merchant for a new DEMO payment link (create_payment on the same Payment Request). / لإعادة المحاولة اطلب رابط دفع تجريبي جديد.{% endif %}</div>
 			{% endif %}
 		</div>
 	</div>

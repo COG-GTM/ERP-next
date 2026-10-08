@@ -48,14 +48,21 @@ def setup(seed_transactions=True):
 	ensure_settings(company)
 	ensure_customer()
 	ensure_item()
-	if seed_transactions and frappe.db.exists("Demo Wallet Transaction", {"company": COMPANY}):
-		# idempotent: the seven scenario transactions already exist, do not duplicate invoices/ledger entries
-		seed_transactions = False
 	if seed_transactions:
 		for amount, state in SEED:
+			# idempotent per scenario: each seeded transaction carries a stable marker in its description
+			if frappe.db.exists(
+				"Demo Wallet Transaction", {"company": COMPANY, "description": seed_marker(amount, state)}
+			):
+				continue
 			seed_transaction(amount, state)
+
 	frappe.db.commit()  # nosemgrep
 	return {"company": company, "customer": CUSTOMER, "item": ITEM, "client_id": DEMO_CLIENT_ID}
+
+
+def seed_marker(amount, state):
+	return f"DEMO seed {state} {int(amount)} / تجريبي"
 
 
 def ensure_company():
@@ -200,6 +207,7 @@ def make_demo_payment_request(amount):
 def seed_transaction(amount, state):
 	"""Create one DEMO transaction and drive it into the requested reconciliation state."""
 	invoice, payment_request, transaction = make_demo_payment_request(amount)
+	transaction.db_set("description", seed_marker(amount, state))
 	if state == "Not Paid":
 		return transaction
 

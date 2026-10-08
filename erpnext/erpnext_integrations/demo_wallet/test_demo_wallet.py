@@ -322,6 +322,29 @@ class TestDemoWallet(ERPNextTestSuite):
 		self.assertFalse(transaction.payment_entry)
 		self.assertEqual(frappe.db.get_value("Payment Request", pr.name, "status"), "Failed")
 
+	def test_retry_after_failed_payment_reopens_payment_request(self):
+		si, pr = self.make_payment_request()
+		transaction = self.get_transaction(pr)
+		body = self.callback_body(transaction, event=api.EVENT_FAILED)
+		api.process_callback(body, self.signed(body))
+		self.assertEqual(frappe.db.get_value("Payment Request", pr.name, "status"), "Failed")
+		settings = frappe.get_single("Demo Wallet Settings")
+		claims = api.require_bearer_token(settings, api.issue_access_token(settings)["access_token"])
+		retry = api.create_transaction(
+			settings,
+			claims,
+			amount=transaction.amount,
+			currency=transaction.currency,
+			reference_doctype="Payment Request",
+			reference_docname=pr.name,
+		)
+		self.assertNotEqual(retry.name, transaction.name)
+		pr.reload()
+		self.assertEqual(pr.status, "Requested")
+		self.assertEqual(pr.payment_url, retry.hosted_page_url)
+		self.pay(retry)
+		self.assertTrue(retry.payment_entry)
+
 	def test_second_capture_for_same_payment_request_is_refused(self):
 		si, pr = self.make_payment_request()
 		transaction = self.get_transaction(pr)

@@ -186,8 +186,18 @@ def create_transaction(settings, claims: dict, **kwargs):
 	payment_request = frappe.db.get_value(
 		"Payment Request",
 		kwargs.get("reference_docname"),
-		["name", "company", "reference_doctype", "reference_name", "grand_total", "currency", "docstatus"],
+		[
+			"name",
+			"company",
+			"reference_doctype",
+			"reference_name",
+			"grand_total",
+			"currency",
+			"docstatus",
+			"status",
+		],
 		as_dict=True,
+		for_update=True,  # row lock: serialises concurrent create_payment calls for the same request
 	)
 	if not payment_request or payment_request.docstatus == 2:
 		frappe.throw(
@@ -234,6 +244,14 @@ def create_transaction(settings, claims: dict, **kwargs):
 		}
 	)
 	transaction.insert(ignore_permissions=True)
+	if payment_request.docstatus == 1 and payment_request.status == "Failed":
+		# retry path after a failed attempt: point the Payment Request at the new checkout and reopen it
+		frappe.db.set_value(
+			"Payment Request",
+			payment_request.name,
+			{"payment_url": transaction.hosted_page_url, "status": "Requested"},
+			update_modified=False,
+		)
 	return transaction
 
 
