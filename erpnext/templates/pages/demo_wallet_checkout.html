@@ -1,0 +1,90 @@
+{% extends "templates/web.html" %}
+
+{% block title %}DEMO Wallet · {{ formatted_amount }}{% endblock %}
+
+{% block script %}
+<script>
+	// Buttons POST to complete_payment with Frappe's CSRF token, then follow the redirect the API returns.
+	document.querySelectorAll(".demo-wallet-complete").forEach((button) => {
+		button.addEventListener("click", () => {
+			const buttons = document.querySelectorAll(".demo-wallet-complete");
+			buttons.forEach((b) => (b.disabled = true));
+			const body = new URLSearchParams({ payment_id: {{ payment_id | tojson }}, outcome: button.dataset.outcome });
+			fetch({{ complete_url | tojson }}, {
+				method: "POST",
+				credentials: "same-origin",
+				headers: {
+					"Content-Type": "application/x-www-form-urlencoded",
+					"Accept": "application/json",
+					"X-Frappe-CSRF-Token": (window.frappe && frappe.csrf_token) || "",
+				},
+				body,
+			})
+				.then((response) => response.json().then((data) => ({ ok: response.ok, data })))
+				.then(({ ok, data }) => {
+					if (ok && data.message && data.message.redirect_to) {
+						window.location.href = data.message.redirect_to;
+						return;
+					}
+					throw new Error((data._server_messages && data._server_messages) || data.exception || "DEMO payment failed");
+				})
+				.catch((error) => {
+					const box = document.getElementById("demo-wallet-error");
+					box.textContent = "DEMO error / خطأ تجريبي: " + error.message;
+					box.style.display = "block";
+					buttons.forEach((b) => (b.disabled = false));
+				});
+		});
+	});
+</script>
+{% endblock %}
+
+{% block page_content %}
+<div class="container" style="max-width: 560px; margin-top: 2rem;">
+	<div class="alert alert-warning text-center" role="alert">
+		<strong>DEMO</strong> — mock payment gateway, no real money moves (demo data, not official)
+		<br><span dir="rtl"><strong>تجريبي</strong> — بوابة دفع وهمية، لا يتم تحويل أي أموال حقيقية</span>
+	</div>
+
+	<div class="card">
+		<div class="card-body">
+			<h3 class="card-title mb-1">Demo Wallet Checkout <span class="text-muted">/</span> <span dir="rtl">الدفع عبر المحفظة التجريبية</span></h3>
+			<p class="text-muted small mb-4">Payment ID / رقم الدفع: <code>{{ payment_id }}</code></p>
+
+			<dl class="row mb-4">
+				<dt class="col-5">Amount / المبلغ</dt>
+				<dd class="col-7"><span class="h4">{{ formatted_amount }}</span> <span class="badge badge-secondary">{{ currency }}</span></dd>
+
+				<dt class="col-5">Payer / الدافع</dt>
+				<dd class="col-7">{{ payer_name or "—" }}</dd>
+
+				<dt class="col-5">Reference / المرجع</dt>
+				<dd class="col-7">{{ reference_name or payment_request }}</dd>
+
+				{% if description %}
+				<dt class="col-5">Description / الوصف</dt>
+				<dd class="col-7">{{ description }}</dd>
+				{% endif %}
+
+				<dt class="col-5">Status / الحالة</dt>
+				<dd class="col-7"><span class="badge badge-{{ 'success' if status == 'Paid' else ('danger' if status in ('Failed', 'Expired') else ('info' if status == 'Refunded' else 'warning')) }}">{{ status }}</span></dd>
+			</dl>
+
+			{% if is_open %}
+			<button type="button" class="btn btn-success btn-lg btn-block mb-2 demo-wallet-complete" data-outcome="success">
+				Pay (simulate success) / ادفع (محاكاة نجاح)
+			</button>
+			<button type="button" class="btn btn-outline-danger btn-block demo-wallet-complete" data-outcome="fail">
+				Fail / إفشال
+			</button>
+			<div id="demo-wallet-error" class="alert alert-danger mt-3" style="display:none"></div>
+			{% elif not gateway_enabled %}
+			<div class="alert alert-secondary mb-0">The Demo Wallet gateway is disabled. / بوابة المحفظة التجريبية معطّلة.</div>
+			{% else %}
+			<div class="alert alert-secondary mb-0">This demo payment is already <strong>{{ status }}</strong>. / تمت معالجة هذا الدفع التجريبي بالفعل.</div>
+			{% endif %}
+		</div>
+	</div>
+	<p class="text-muted small text-center mt-3">DEMO · Demo Wallet is a mock gateway bundled with ERPNext for demonstrations.</p>
+</div>
+{% endblock %}
