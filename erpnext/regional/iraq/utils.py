@@ -8,8 +8,6 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from erpnext.controllers.taxes_and_totals import get_itemised_tax
-
 # DEMO ASSUMPTION - NOT AN OFFICIAL SPECIFICATION.
 # Iraq's General Commission for Taxes introduced e-registration and a unified tax number, but no public
 # format specification was available to us. For this demo the number is validated as exactly 10 digits,
@@ -82,6 +80,8 @@ def validate_regional(doc):
 		return
 
 	validate_party_tax_id(doc)
+	# recompute (or reset, when every tax row was removed) the per-item tax fields
+	update_itemised_tax_data(doc)
 
 
 def update_itemised_tax_data(doc):
@@ -90,26 +90,85 @@ def update_itemised_tax_data(doc):
 	Writes the item-wise tax rate, tax amount and total onto each item row so the Iraq Tax Invoice
 	print format can show tax per line. Iraq has no VAT (only sales taxes on specific goods and
 	services), so there is no zero-rated / export handling here.
+
+	Amounts are computed per item *row* (not grouped by item code, so repeated item codes are not
+	double counted) in the transaction currency and reconciled to each tax row's
+	`tax_amount_after_discount_amount`, so the line taxes add up to the invoice tax exactly.
+	Rows without taxes are reset to zero.
 	"""
-	if not doc.items:
+	if not doc.get("items"):
 		return
 
-	meta = frappe.get_meta(doc.items[0].doctype)
-	if not meta.has_field("tax_rate"):
+	if not frappe.get_meta(doc.items[0].doctype).has_field("tax_rate"):
 		return
 
-	itemised_tax = get_itemised_tax(doc)
+	totals = {id(row): [0.0, 0.0] for row in doc.items}
+	details_by_tax = {}
+	for detail in doc.get("_item_wise_tax_details") or []:
+		item, tax = detail.get("item"), detail.get("tax")
+		if item is None or tax is None or id(item) not in totals or tax.get("category") == "Valuation":
+			continue
+		details_by_tax.setdefault(id(tax), (tax, []))[1].append(detail)
+
+	for tax, details in details_by_tax.values():
+		for item_id, rate, amount in _allocate_tax_row(doc, tax, details):
+			totals[item_id][0] += rate
+			totals[item_id][1] += amount
 
 	for row in doc.items:
-		tax_rate, tax_amount = 0.0, 0.0
-		item_code = row.item_code or row.item_name
-		for tax in (itemised_tax.get(item_code) or {}).values():
-			tax_rate += flt(tax.get("tax_rate", 0))
-			tax_amount += flt(tax.get("tax_amount", 0))
-
+		tax_rate, tax_amount = totals[id(row)]
 		row.tax_rate = flt(tax_rate, row.precision("tax_rate"))
 		row.tax_amount = flt(tax_amount, row.precision("tax_amount"))
 		row.total_amount = flt(row.net_amount + row.tax_amount, row.precision("total_amount"))
+
+
+def _allocate_tax_row(doc, tax, details):
+	"""Yield (item row id, rate, transaction-currency tax amount) for one Sales/Purchase Taxes row.
+
+	`_item_wise_tax_details` stores amounts in *company* currency, rounded to the base precision, so
+	dividing them by the conversion rate cannot recover the transaction amount (e.g. a USD-based
+	company invoicing IQD). Instead weight each row in the transaction currency the same way the tax
+	controller computes it (`net_amount * rate` for On Net Total, so zero-rated items get nothing,
+	`net_amount` for Actual, `qty * rate` for On Item Quantity, converted detail for On Previous Row ...) and scale the weights with running-total
+	rounding so they sum to the tax row's transaction-currency `tax_amount_after_discount_amount`
+	(sign-adjusted for "Deduct" rows; zero when a Grand Total discount wiped the tax out).
+	"""
+	conversion_rate = flt(doc.get("conversion_rate")) or 1.0
+	multiplier = -1 if tax.get("add_deduct_tax") == "Deduct" else 1
+	precision = details[0].item.precision("tax_amount")
+	charge_type = tax.get("charge_type")
+
+	weights = []
+	for detail in details:
+		if charge_type == "On Item Quantity":
+			weight = multiplier * flt(detail.item.qty) * flt(detail.rate)
+		elif charge_type == "On Net Total":
+			weight = multiplier * flt(detail.item.net_amount) * flt(detail.rate)
+		elif charge_type == "Actual":
+			weight = multiplier * flt(detail.item.net_amount)
+		else:
+			weight = flt(detail.amount) / conversion_rate
+		weights.append(weight)
+
+	target = multiplier * flt(tax.get("tax_amount_after_discount_amount"))
+	weight_total = sum(weights)
+	if not weight_total and target:
+		# rounded base details carry no usable weight (tiny foreign-currency charge): spread by net amount
+		weights = [flt(detail.item.net_amount) for detail in details]
+		weight_total = sum(weights)
+	if not weight_total and target:
+		# net amounts cancel out (e.g. a return line offsets a sale) or are all zero: like the tax
+		# controller, book the whole fixed charge against the last item
+		weights = [0.0] * (len(details) - 1) + [1.0]
+		weight_total = 1.0
+	factor = target / weight_total if weight_total else 0.0
+
+	running_weight = running_allocated = 0.0
+	for detail, weight in zip(details, weights, strict=True):
+		running_weight += weight
+		allocated_so_far = flt(running_weight * factor, precision)
+		yield id(detail.item), flt(detail.rate), allocated_so_far - running_allocated
+		running_allocated = allocated_so_far
 
 
 def get_governorates() -> list[dict]:

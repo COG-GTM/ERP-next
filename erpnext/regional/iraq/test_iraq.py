@@ -2,7 +2,7 @@
 # License: GNU General Public License v3. See license.txt
 
 import frappe
-from frappe.utils import flt, nowdate
+from frappe.utils import flt, fmt_money, nowdate
 
 from erpnext.regional.iraq.setup import PRINT_FORMAT, setup
 from erpnext.regional.iraq.utils import (
@@ -17,6 +17,7 @@ from erpnext.utilities.regional import temporary_flag
 COMPANY = "DEMO - Iraq Test Company"
 COMPANY_ABBR = "DIQT"
 COMPANY_TAX_ID = "IQ0000000001"
+CUSTOMER_TAX_ID = "IQ1234567890"
 COMPANY_NAME_AR = "تجريبي - شركة العراق للاختبار"
 CUSTOMER = "DEMO - Iraq Test Customer"
 PRICE_LIST = "DEMO - Iraq Selling (IQD)"
@@ -158,20 +159,75 @@ class TestIraq(ERPNextTestSuite):
 		self.assertEqual(si.company_iraq_tax_id, COMPANY_TAX_ID)
 		self.assertEqual(si.customer_name_in_arabic, "تجريبي - عميل العراق")
 
-		# the regional override is only active for Iraq companies
-		with temporary_flag("company", COMPANY):
-			from erpnext.controllers.taxes_and_totals import update_itemised_tax_data
-
-			item.tax_rate = item.tax_amount = item.total_amount = 0
-			update_itemised_tax_data(si)
-			self.assertEqual(flt(item.tax_rate), 10.0)
+		# recalculating the (reloaded) invoice re-runs the regional override
+		item.tax_rate = item.tax_amount = item.total_amount = 0
+		si.calculate_taxes_and_totals()
+		self.assertEqual(flt(si.items[0].tax_rate), 10.0)
 
 		html = frappe.get_print("Sales Invoice", si.name, PRINT_FORMAT)
 		self.assertIn('dir="rtl"', html)
 		self.assertIn("IQ1234567890", html)
 		self.assertIn(COMPANY_TAX_ID, html)
 		self.assertIn("تجريبي - عميل العراق", html)
-		self.assertIn(si.get_formatted("grand_total", si), html)
+		# IQD renders with 3 decimals (fils) even though the site currency_precision is 2
+		self.assertIn(fmt_money(si.grand_total, 3, "IQD"), html)
+		self.assertIn(fmt_money(si.items[0].net_rate, 3, "IQD"), html)
+
+	def test_itemised_tax_per_row_currency_and_reset(self):
+		with self.change_settings("Selling Settings", {"allow_multiple_items": 1}):
+			frappe.clear_cache(doctype="Selling Settings")
+			# two rows with the same item code must not be double counted; amounts are in invoice currency
+			si = make_iraq_sales_invoice(do_not_insert=True)
+			si.append("items", si.items[0].as_dict(no_default_fields=True) | {"qty": 1, "rate": 50000})
+			si.currency = "USD"
+			si.price_list_currency = "USD"
+			si.conversion_rate = si.plc_conversion_rate = 1300
+			si.insert()
+
+			for row in si.items:
+				self.assertEqual(flt(row.tax_rate), 10.0)
+				self.assertEqual(flt(row.tax_amount, 2), flt(row.net_amount * 0.10, 2))
+				self.assertEqual(flt(row.total_amount, 2), flt(row.net_amount + row.tax_amount, 2))
+			self.assertEqual(
+				flt(sum(row.tax_amount for row in si.items), 2), flt(si.total_taxes_and_charges, 2)
+			)
+
+			# removing every tax row resets the per-item fields
+			si.taxes = []
+			si.save()
+			for row in si.items:
+				self.assertEqual(flt(row.tax_rate), 0.0)
+				self.assertEqual(flt(row.tax_amount), 0.0)
+				self.assertEqual(flt(row.total_amount), flt(row.net_amount))
+
+	def test_allocate_tax_row_edge_cases(self):
+		from erpnext.regional.iraq.utils import _allocate_tax_row
+
+		def detail(net_amount, rate, amount):
+			item = frappe._dict(net_amount=net_amount, qty=1, precision=lambda field: 3)
+			return frappe._dict(item=item, rate=rate, amount=amount)
+
+		doc = frappe._dict(conversion_rate=1.0)
+
+		# zero-rated item next to a taxed one: the exempt row must get no tax
+		tax = frappe._dict(charge_type="On Net Total", tax_amount_after_discount_amount=10.0)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(100, 10, 10), detail(100, 0, 0)])]
+		self.assertEqual(allocated, [10.0, 0.0])
+
+		# fixed (Actual) charge on a balanced invoice: sale and return cancel, charge lands on the last row
+		tax = frappe._dict(charge_type="Actual", tax_amount_after_discount_amount=10.0)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(100, 0, 10), detail(-100, 0, 0)])]
+		self.assertEqual(allocated, [0.0, 10.0])
+		self.assertEqual(sum(allocated), 10.0)
+
+		# Actual charge spread by net amount (rate is not a percentage here)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(300, 0, 7.5), detail(100, 0, 2.5)])]
+		self.assertEqual(allocated, [7.5, 2.5])
+
+		# tax wiped out by a Grand Total discount stays zero on every row
+		tax = frappe._dict(charge_type="On Net Total", tax_amount_after_discount_amount=0.0)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(100, 10, 10), detail(100, 10, 10)])]
+		self.assertEqual(allocated, [0.0, 0.0])
 
 
 def make_iraq_company():
@@ -200,7 +256,11 @@ def make_iraq_company():
 
 def make_iraq_customer():
 	if frappe.db.exists("Customer", CUSTOMER):
-		return frappe.get_doc("Customer", CUSTOMER)
+		customer = frappe.get_doc("Customer", CUSTOMER)
+		if customer.iraq_tax_id != CUSTOMER_TAX_ID:
+			frappe.db.set_value("Customer", CUSTOMER, "iraq_tax_id", CUSTOMER_TAX_ID)
+			customer.reload()
+		return customer
 
 	customer = frappe.get_doc(
 		{
@@ -210,7 +270,7 @@ def make_iraq_customer():
 			"customer_group": "_Test Customer Group",
 			"territory": "Baghdad",
 			"customer_name_in_arabic": "تجريبي - عميل العراق",
-			"iraq_tax_id": "IQ1234567890",
+			"iraq_tax_id": CUSTOMER_TAX_ID,
 		}
 	)
 	customer.insert()
