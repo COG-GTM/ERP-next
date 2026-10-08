@@ -263,7 +263,8 @@ def get_direct_disbursements(company, fieldname, value, fy_start, fy_end, exclud
 	pe = qb.DocType("Payment Entry")
 	query = (
 		qb.from_(pe)
-		.select(Sum(pe.unallocated_amount * pe.source_exchange_rate))
+		# a Pay entry's unallocated_amount is held in the party (target) currency
+		.select(Sum(pe.unallocated_amount * pe.target_exchange_rate))
 		.where(
 			(pe.docstatus == 1)
 			& (pe.company == company)

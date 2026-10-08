@@ -4,11 +4,15 @@
 import frappe
 from frappe import _
 
-from erpnext.accounts.public_finance.budget_control import compute_commitment_vs_actual
+from erpnext.accounts.public_finance.budget_control import (
+	check_budget_read_permission,
+	compute_commitment_vs_actual,
+)
 
 
 def execute(filters=None):
 	filters = frappe._dict(filters or {})
+	check_budget_read_permission(filters.company)
 	data = compute_commitment_vs_actual(filters)
 	return get_columns(filters), data, None, get_chart(filters, data)
 

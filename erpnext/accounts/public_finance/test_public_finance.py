@@ -197,6 +197,11 @@ class TestPublicFinance(ERPNextTestSuite):
 			self.assertRaises(
 				frappe.PermissionError, export_budget_vs_actual, COMPANY, self.fiscal_year, "Ministry"
 			)
+			from erpnext.accounts.report.budget_commitment_vs_actual.budget_commitment_vs_actual import (
+				execute,
+			)
+
+			self.assertRaises(frappe.PermissionError, execute, filters)
 
 	def test_open_data_export_csv_and_json(self):
 		self.make_budget(100_000)

@@ -6,7 +6,10 @@ from frappe import _
 from frappe.utils import flt, nowdate
 from frappe.utils.dashboard import cache_source
 
-from erpnext.accounts.public_finance.budget_control import compute_commitment_vs_actual
+from erpnext.accounts.public_finance.budget_control import (
+	check_budget_read_permission,
+	compute_commitment_vs_actual,
+)
 from erpnext.accounts.utils import get_fiscal_year
 
 
@@ -31,6 +34,7 @@ def get(
 		or frappe.db.get_value("Company", {}, "name")
 	)
 	fiscal_year = filters.fiscal_year or get_fiscal_year(nowdate(), company=company)[0]
+	check_budget_read_permission(company)
 
 	rows = compute_commitment_vs_actual(
 		{"company": company, "fiscal_year": fiscal_year, "dimension": filters.dimension or "Ministry"}

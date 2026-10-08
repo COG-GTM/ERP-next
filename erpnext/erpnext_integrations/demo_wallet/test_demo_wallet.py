@@ -352,6 +352,23 @@ class TestDemoWallet(ERPNextTestSuite):
 		first = api.refund_transaction(transaction, amount=40, reason="DEMO partial")
 		self.assertEqual(first.status, "Paid")
 		self.assertEqual(flt(first.refund_amount), 40)
+		from erpnext.erpnext_integrations.report.demo_wallet_reconciliation.demo_wallet_reconciliation import (
+			PARTIALLY_REFUNDED,
+			reconciliation_status,
+		)
+
+		self.assertEqual(
+			reconciliation_status(
+				frappe._dict(
+					gateway_status="Paid",
+					refund_amount=40,
+					refund_payment_entry=first.refund_payment_entry,
+					refund_entry_docstatus=1,
+				),
+				100,
+			),
+			PARTIALLY_REFUNDED,
+		)
 		self.assertRaises(frappe.ValidationError, api.refund_transaction, transaction, 61, "DEMO too much")
 		first_refund_id = first.refund_id
 		second = api.refund_transaction(transaction, amount=60, reason="DEMO rest")

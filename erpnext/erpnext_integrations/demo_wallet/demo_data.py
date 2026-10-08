@@ -117,11 +117,13 @@ def ensure_settings(company):
 			"enabled": 1,
 			"company": company,
 			"client_id": DEMO_CLIENT_ID,
-			"client_secret": frappe.generate_hash(length=32),
-			"hmac_secret": frappe.generate_hash(length=48),
 			"token_ttl_seconds": 300,
 		}
 	)
+	# secrets are generated once per site; re-running the demo bootstrap must not invalidate tokens
+	for field, length in (("client_secret", 32), ("hmac_secret", 48)):
+		if not settings.get_password(field, raise_exception=False):
+			settings.set(field, frappe.generate_hash(length=length))
 	settings.save(ignore_permissions=True)
 	return settings
 
