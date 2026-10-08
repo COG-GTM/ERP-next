@@ -342,6 +342,9 @@ class TestDemoWallet(ERPNextTestSuite):
 		pr.reload()
 		self.assertEqual(pr.status, "Requested")
 		self.assertEqual(pr.payment_url, retry.hosted_page_url)
+		# a stale/duplicate failure for the old attempt must not close the open retry
+		api.process_callback(body, self.signed(body))
+		self.assertEqual(frappe.db.get_value("Payment Request", pr.name, "status"), "Requested")
 		self.pay(retry)
 		self.assertTrue(retry.payment_entry)
 

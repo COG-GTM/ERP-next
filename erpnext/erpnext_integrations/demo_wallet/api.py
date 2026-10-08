@@ -384,6 +384,16 @@ def _mark_payment_request_failed(transaction: Document):
 	explicitly (only while no other attempt against the same request has succeeded)."""
 	payment_request = frappe.get_doc("Payment Request", transaction.payment_request)
 	payment_request.run_method("set_failed")
+	newer_attempt = frappe.db.exists(
+		TRANSACTION_DOCTYPE,
+		{
+			"payment_request": payment_request.name,
+			"status": ("in", ("Created", "Pending")),
+			"name": ("!=", transaction.name),
+		},
+	)
+	if newer_attempt:
+		return  # a retry checkout is open; the old attempt's failure must not close it
 	if payment_request.docstatus == 1 and payment_request.status not in (
 		"Paid",
 		"Partially Paid",

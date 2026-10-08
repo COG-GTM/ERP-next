@@ -53,12 +53,28 @@ def setup(seed_transactions=True):
 			# idempotent per scenario: each seeded transaction carries a stable marker in its description
 			if frappe.db.exists(
 				"Demo Wallet Transaction", {"company": COMPANY, "description": seed_marker(amount, state)}
-			):
+			) or legacy_seed_exists(amount, state):
 				continue
 			seed_transaction(amount, state)
 
 	frappe.db.commit()  # nosemgrep
 	return {"company": company, "customer": CUSTOMER, "item": ITEM, "client_id": DEMO_CLIENT_ID}
+
+
+def legacy_seed_exists(amount, state):
+	"""Recognise rows seeded before markers existed: same company, amount and gateway status, no marker."""
+	status = {
+		"Not Paid": "Created",
+		"Missing Payment Entry": "Paid",
+		"Amount Mismatch": "Paid",
+		"Matched": "Paid",
+	}.get(state, state)
+	if state == "Amount Mismatch":
+		amount = amount + 2500  # seed_transaction bumps the gateway amount to create the mismatch
+	return frappe.db.exists(
+		"Demo Wallet Transaction",
+		{"company": COMPANY, "amount": amount, "status": status, "description": ("is", "not set")},
+	)
 
 
 def seed_marker(amount, state):
