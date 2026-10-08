@@ -320,14 +320,48 @@ class TestDemoWallet(ERPNextTestSuite):
 		transaction.reload()
 		self.assertEqual(transaction.status, "Failed")
 		self.assertFalse(transaction.payment_entry)
+		self.assertEqual(frappe.db.get_value("Payment Request", pr.name, "status"), "Failed")
+
+	def test_second_capture_for_same_payment_request_is_refused(self):
+		si, pr = self.make_payment_request()
+		transaction = self.get_transaction(pr)
+		settings = frappe.get_single("Demo Wallet Settings")
+		claims = api.require_bearer_token(settings, api.issue_access_token(settings)["access_token"])
+		kwargs = dict(
+			amount=transaction.amount,
+			currency=transaction.currency,
+			reference_doctype="Payment Request",
+			reference_docname=pr.name,
+		)
+		# while the first attempt is open, create_payment hands back the same transaction
+		self.assertEqual(api.create_transaction(settings, claims, **kwargs).name, transaction.name)
+		self.pay(transaction)
+		self.assertRaises(frappe.ValidationError, api.create_transaction, settings, claims, **kwargs)
+		self.assertEqual(
+			frappe.db.count("Payment Entry", {"reference_no": pr.name, "docstatus": 1})
+			or frappe.db.count("Demo Wallet Transaction", {"payment_request": pr.name}),
+			1,
+		)
+
+	def test_refund_without_payment_entry_is_refused(self):
+		si, pr = self.make_payment_request()
+		transaction = self.get_transaction(pr)
+		self.pay(transaction)
+		transaction.db_set("payment_entry", None)
+		transaction.reload()
+		self.assertRaises(frappe.ValidationError, api.refund_transaction, transaction, None, "DEMO")
+		transaction.reload()
+		self.assertEqual(transaction.status, "Paid")
+		self.assertFalse(transaction.refund_id)
 
 	def test_complete_payment_from_hosted_page(self):
 		si, pr = self.make_payment_request()
 		transaction = self.get_transaction(pr)
 		result = api.complete_payment(payment_id=transaction.name, outcome="success")
 		self.assertEqual(result["status"], "Paid")
-		self.assertIn(api.SUCCESS_PATH, result["redirect_to"])
-		self.assertIn(pr.name, result["redirect_to"])
+		self.assertIn(api.SUCCESS_PATH, result["standard_redirect_to"])
+		self.assertIn("/demo_wallet_checkout?payment_id=" + transaction.name, result["redirect_to"])
+		self.assertIn(pr.name, result["standard_redirect_to"])
 		# a second press on the hosted page is refused
 		self.assertRaises(frappe.ValidationError, api.complete_payment, payment_id=transaction.name)
 
@@ -335,7 +369,8 @@ class TestDemoWallet(ERPNextTestSuite):
 		transaction2 = self.get_transaction(pr2)
 		result = api.complete_payment(payment_id=transaction2.name, outcome="fail")
 		self.assertEqual(result["status"], "Failed")
-		self.assertIn(api.FAILED_PATH, result["redirect_to"])
+		self.assertIn(api.FAILED_PATH, result["standard_redirect_to"])
+		self.assertIn("result=failed", result["redirect_to"])
 
 	# ---- check_status / refund ---------------------------------------------------------------
 

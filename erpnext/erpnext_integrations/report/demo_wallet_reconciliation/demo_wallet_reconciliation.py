@@ -13,9 +13,17 @@ MATCHED = "Matched"
 MISSING_PAYMENT_ENTRY = "Missing Payment Entry"
 AMOUNT_MISMATCH = "Amount Mismatch"
 REFUNDED = "Refunded"
+REFUND_NOT_POSTED = "Refund Not Posted"
 NOT_PAID = "Not Paid"
 
-RECONCILIATION_STATUSES = (MATCHED, MISSING_PAYMENT_ENTRY, AMOUNT_MISMATCH, REFUNDED, NOT_PAID)
+RECONCILIATION_STATUSES = (
+	MATCHED,
+	MISSING_PAYMENT_ENTRY,
+	AMOUNT_MISMATCH,
+	REFUNDED,
+	REFUND_NOT_POSTED,
+	NOT_PAID,
+)
 
 
 def execute(filters=None):
@@ -130,6 +138,7 @@ def get_transactions(filters):
 	transaction = frappe.qb.DocType("Demo Wallet Transaction")
 	payment_request = frappe.qb.DocType("Payment Request")
 	payment_entry = frappe.qb.DocType("Payment Entry")
+	refund_entry = frappe.qb.DocType("Payment Entry").as_("refund_entry")
 
 	conditions = []
 	if filters.get("company"):
@@ -145,6 +154,8 @@ def get_transactions(filters):
 		.on(payment_request.name == transaction.payment_request)
 		.left_join(payment_entry)
 		.on(payment_entry.name == transaction.payment_entry)
+		.left_join(refund_entry)
+		.on(refund_entry.name == transaction.refund_payment_entry)
 		.select(
 			transaction.name.as_("transaction"),
 			transaction.creation,
@@ -161,7 +172,11 @@ def get_transactions(filters):
 			transaction.signature_verified,
 			payment_request.status.as_("payment_request_status"),
 			payment_entry.paid_amount,
+			payment_entry.received_amount,
+			payment_entry.paid_to_account_currency,
 			payment_entry.docstatus.as_("payment_entry_docstatus"),
+			transaction.refund_payment_entry,
+			refund_entry.docstatus.as_("refund_entry_docstatus"),
 		)
 		.orderby(transaction.creation, order=frappe.qb.desc)
 	)
@@ -172,7 +187,11 @@ def get_transactions(filters):
 
 def build_row(d):
 	row = dict(d)
-	ledger_amount = flt(d.paid_amount) if d.payment_entry and d.payment_entry_docstatus == 1 else 0
+	ledger_amount = 0
+	if d.payment_entry and d.payment_entry_docstatus == 1:
+		# compare in the gateway currency: the receipt's paid_to (bank) side when it is in that
+		# currency, otherwise the receivable side
+		ledger_amount = flt(d.received_amount if d.paid_to_account_currency == d.currency else d.paid_amount)
 	row["ledger_amount"] = ledger_amount
 	row["difference"] = flt(d.gateway_amount) - ledger_amount
 	row["reconciliation_status"] = reconciliation_status(d, ledger_amount)
@@ -183,7 +202,7 @@ def build_row(d):
 
 def reconciliation_status(d, ledger_amount):
 	if d.gateway_status == REFUNDED:
-		return REFUNDED
+		return REFUNDED if d.refund_payment_entry and d.refund_entry_docstatus == 1 else REFUND_NOT_POSTED
 	if d.gateway_status != "Paid":
 		return NOT_PAID
 	if not ledger_amount:

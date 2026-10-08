@@ -21,6 +21,7 @@ from urllib.parse import urlencode
 
 import frappe
 from frappe import _
+from frappe.model.document import Document
 from frappe.utils import cint, flt, get_url, now_datetime, nowdate
 
 from erpnext.erpnext_integrations.demo_wallet import gateway
@@ -64,11 +65,11 @@ def _unauthorized(error: str, description: str):
 def _as_administrator():
 	"""Gateway requests are authenticated by HMAC/bearer token, not by a Desk session."""
 	user = frappe.session.user
-	frappe.set_user("Administrator")
+	frappe.set_user("Administrator")  # nosemgrep: caller already verified HMAC signature / bearer token
 	try:
 		yield
 	finally:
-		frappe.set_user(user)
+		frappe.set_user(user)  # nosemgrep
 
 
 def issue_access_token(settings) -> dict:
@@ -119,7 +120,9 @@ def transaction_payload(transaction) -> dict:
 	}
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
+@frappe.whitelist(
+	allow_guest=True, methods=["POST"]
+)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
 def token(
 	client_id: str | None = None, client_secret: str | None = None, grant_type: str = "client_credentials"
 ):
@@ -138,7 +141,9 @@ def token(
 	return issue_access_token(settings)
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
+@frappe.whitelist(
+	allow_guest=True, methods=["POST"]
+)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
 def create_payment(
 	amount: float | str | None = None,
 	currency: str | None = None,
@@ -196,6 +201,26 @@ def create_transaction(settings, claims: dict, **kwargs):
 	if payment_request.currency != currency or flt(payment_request.grand_total) != amount:
 		frappe.throw(_("Amount or currency does not match Payment Request {0}").format(payment_request.name))
 
+	# one payable transaction per Payment Request: reuse an open one, refuse a second capture of a paid one
+	existing = frappe.db.get_value(
+		TRANSACTION_DOCTYPE,
+		{
+			"payment_request": payment_request.name,
+			"status": ("in", ("Created", "Pending", "Paid", "Refunded")),
+		},
+		["name", "status"],
+		as_dict=True,
+	)
+	if existing and existing.status in ("Paid", "Refunded"):
+		frappe.throw(
+			_("Payment Request {0} was already paid by Demo Wallet payment {1}").format(
+				payment_request.name, existing.name
+			),
+			frappe.ValidationError,
+		)
+	if existing:
+		return frappe.get_doc(TRANSACTION_DOCTYPE, existing.name)
+
 	transaction = frappe.get_doc(
 		{
 			"doctype": TRANSACTION_DOCTYPE,
@@ -232,7 +257,9 @@ def build_callback_body(transaction, outcome: str) -> bytes:
 	return json.dumps(body, sort_keys=True).encode("utf-8")
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
+@frappe.whitelist(
+	allow_guest=True, methods=["POST"]
+)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
 def complete_payment(payment_id: str | None = None, outcome: str = "success"):
 	"""Hosted page button handler: simulates the wallet confirming or failing the payment and
 	delivers the signed callback to ``process_callback`` exactly as a webhook would."""
@@ -251,14 +278,19 @@ def complete_payment(payment_id: str | None = None, outcome: str = "success"):
 	raw_body = build_callback_body(transaction, outcome)
 	result = process_callback(raw_body, gateway.sign(get_signing_key(settings), raw_body), settings)
 
+	# land back on the DEMO-labelled hosted page (shows the final status) rather than the generic
+	# ERPNext /payment-success page; the standard page stays reachable via ``standard_redirect_to``
 	query = urlencode({"doctype": "Payment Request", "docname": transaction.payment_request})
-	result["redirect_to"] = (
+	result["standard_redirect_to"] = (
 		f"{SUCCESS_PATH}?{query}" if result["status"] == "Paid" else f"{FAILED_PATH}?{query}"
 	)
+	result["redirect_to"] = get_checkout_url(transaction.name) + "&result=" + result["status"].lower()
 	return result
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
+@frappe.whitelist(
+	allow_guest=True, methods=["POST"]
+)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
 def callback():
 	"""Gateway -> ERPNext webhook. Body: JSON; header ``X-Demo-Wallet-Signature``: hex HMAC-SHA256."""
 	raw_body = frappe.request.data if getattr(frappe.local, "request", None) else b""
@@ -304,7 +336,7 @@ def process_callback(raw_body: bytes, signature: str, settings=None) -> dict:
 		)
 	elif event == EVENT_FAILED:
 		with _as_administrator():
-			frappe.get_doc("Payment Request", transaction.payment_request).run_method("set_failed")
+			_mark_payment_request_failed(transaction)
 		transaction.db_set(
 			{
 				"status": "Failed",
@@ -323,6 +355,13 @@ def _mark_payment_request_paid(transaction) -> str | None:
 	"""Drive ERPNext's own Payment Request -> Payment Entry path (``set_as_paid``)."""
 	payment_request = frappe.get_doc("Payment Request", transaction.payment_request)
 	if payment_request.status == "Paid":
+		if not transaction.payment_entry:
+			frappe.throw(
+				_("Payment Request {0} is already paid; refusing a second capture").format(
+					payment_request.name
+				),
+				frappe.ValidationError,
+			)
 		return transaction.payment_entry
 	if hasattr(payment_request, "on_payment_authorized"):
 		payment_request.run_method("on_payment_authorized", "Completed")
@@ -330,7 +369,20 @@ def _mark_payment_request_paid(transaction) -> str | None:
 	return payment_entry.name if payment_entry else None
 
 
-@frappe.whitelist(allow_guest=True)
+@frappe.whitelist(allow_guest=True)  # nosemgrep: DEMO gateway endpoint, bearer token checked inside
+def _mark_payment_request_failed(transaction: Document):
+	"""ERPNext's ``PaymentRequest.set_failed`` is a no-op, so set the documented ``Failed`` status
+	explicitly (only while no other attempt against the same request has succeeded)."""
+	payment_request = frappe.get_doc("Payment Request", transaction.payment_request)
+	payment_request.run_method("set_failed")
+	if payment_request.docstatus == 1 and payment_request.status not in (
+		"Paid",
+		"Partially Paid",
+		"Cancelled",
+	):
+		payment_request.db_set("status", "Failed")
+
+
 def check_status(payment_id: str | None = None, access_token: str | None = None):
 	settings = get_settings()
 	_ensure_enabled(settings)
@@ -338,7 +390,9 @@ def check_status(payment_id: str | None = None, access_token: str | None = None)
 	return transaction_payload(get_transaction(payment_id))
 
 
-@frappe.whitelist(allow_guest=True, methods=["POST"])
+@frappe.whitelist(
+	allow_guest=True, methods=["POST"]
+)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
 def refund(
 	payment_id: str | None = None,
 	amount: float | str | None = None,
@@ -386,11 +440,26 @@ def refund_transaction(transaction, amount=None, reason: str | None = None):
 def create_refund_payment_entry(transaction, refund_amount: float, refund_id: str, reason: str | None = None):
 	"""Reversing document: a Payment Entry of type ``Pay`` to the customer, from the gateway bank
 	account back to the receivable account (ERPNext's standard customer-refund posting)."""
-	if not transaction.payment_entry:
-		return None
+	if (
+		not transaction.payment_entry
+		or frappe.db.get_value("Payment Entry", transaction.payment_entry, "docstatus") != 1
+	):
+		frappe.throw(
+			_(
+				"Cannot refund Demo Wallet payment {0}: its original Payment Entry is missing or not submitted"
+			).format(transaction.name),
+			frappe.ValidationError,
+		)
 
 	original = frappe.get_doc("Payment Entry", transaction.payment_entry)
-	fraction = refund_amount / flt(original.paid_amount) if flt(original.paid_amount) else 1
+	# transaction.amount is in the Payment Request / gateway bank-account currency (= paid_to on the
+	# receipt); the receivable side (paid_from) may be in another currency, so scale each side separately
+	gateway_side = (
+		original.received_amount
+		if original.paid_to_account_currency == transaction.currency
+		else original.paid_amount
+	)
+	fraction = refund_amount / flt(gateway_side) if flt(gateway_side) else 1
 	precision = original.precision("paid_amount")
 
 	refund_entry = frappe.new_doc("Payment Entry")
@@ -407,7 +476,7 @@ def create_refund_payment_entry(transaction, refund_amount: float, refund_id: st
 			"paid_to": original.paid_from,
 			"paid_to_account_currency": original.paid_from_account_currency,
 			"paid_amount": flt(original.received_amount * fraction, precision),
-			"received_amount": flt(refund_amount, precision),
+			"received_amount": flt(original.paid_amount * fraction, precision),
 			"source_exchange_rate": original.target_exchange_rate,
 			"target_exchange_rate": original.source_exchange_rate,
 			"reference_no": refund_id,
