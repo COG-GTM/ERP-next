@@ -65,7 +65,7 @@ def _unauthorized(error: str, description: str):
 def _as_administrator():
 	"""Gateway requests are authenticated by HMAC/bearer token, not by a Desk session."""
 	user = frappe.session.user
-	frappe.set_user("Administrator")  # nosemgrep: caller already verified HMAC signature / bearer token
+	frappe.set_user("Administrator")  # nosemgrep
 	try:
 		yield
 	finally:
@@ -120,9 +120,7 @@ def transaction_payload(transaction) -> dict:
 	}
 
 
-@frappe.whitelist(
-	allow_guest=True, methods=["POST"]
-)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # nosemgrep
 def token(
 	client_id: str | None = None, client_secret: str | None = None, grant_type: str = "client_credentials"
 ):
@@ -141,9 +139,7 @@ def token(
 	return issue_access_token(settings)
 
 
-@frappe.whitelist(
-	allow_guest=True, methods=["POST"]
-)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # nosemgrep
 def create_payment(
 	amount: float | str | None = None,
 	currency: str | None = None,
@@ -257,9 +253,7 @@ def build_callback_body(transaction, outcome: str) -> bytes:
 	return json.dumps(body, sort_keys=True).encode("utf-8")
 
 
-@frappe.whitelist(
-	allow_guest=True, methods=["POST"]
-)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # nosemgrep
 def complete_payment(payment_id: str | None = None, outcome: str = "success"):
 	"""Hosted page button handler: simulates the wallet confirming or failing the payment and
 	delivers the signed callback to ``process_callback`` exactly as a webhook would."""
@@ -288,9 +282,7 @@ def complete_payment(payment_id: str | None = None, outcome: str = "success"):
 	return result
 
 
-@frappe.whitelist(
-	allow_guest=True, methods=["POST"]
-)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # nosemgrep
 def callback():
 	"""Gateway -> ERPNext webhook. Body: JSON; header ``X-Demo-Wallet-Signature``: hex HMAC-SHA256."""
 	raw_body = frappe.request.data if getattr(frappe.local, "request", None) else b""
@@ -369,7 +361,6 @@ def _mark_payment_request_paid(transaction) -> str | None:
 	return payment_entry.name if payment_entry else None
 
 
-@frappe.whitelist(allow_guest=True)  # nosemgrep: DEMO gateway endpoint, bearer token checked inside
 def _mark_payment_request_failed(transaction: Document):
 	"""ERPNext's ``PaymentRequest.set_failed`` is a no-op, so set the documented ``Failed`` status
 	explicitly (only while no other attempt against the same request has succeeded)."""
@@ -383,6 +374,7 @@ def _mark_payment_request_failed(transaction: Document):
 		payment_request.db_set("status", "Failed")
 
 
+@frappe.whitelist(allow_guest=True)  # nosemgrep
 def check_status(payment_id: str | None = None, access_token: str | None = None):
 	settings = get_settings()
 	_ensure_enabled(settings)
@@ -390,9 +382,7 @@ def check_status(payment_id: str | None = None, access_token: str | None = None)
 	return transaction_payload(get_transaction(payment_id))
 
 
-@frappe.whitelist(
-	allow_guest=True, methods=["POST"]
-)  # nosemgrep: DEMO gateway endpoint, HMAC/token checked inside
+@frappe.whitelist(allow_guest=True, methods=["POST"])  # nosemgrep
 def refund(
 	payment_id: str | None = None,
 	amount: float | str | None = None,
