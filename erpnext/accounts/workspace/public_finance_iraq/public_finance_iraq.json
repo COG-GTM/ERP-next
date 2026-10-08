@@ -1,0 +1,148 @@
+{
+ "app": "erpnext",
+ "charts": [
+  {
+   "chart_name": "Budget Consumption by Ministry",
+   "label": "استهلاك الميزانية حسب الوزارة / Budget Consumption by Ministry"
+  },
+  {
+   "chart_name": "Collections by Governorate",
+   "label": "التحصيلات حسب المحافظة / Collections by Governorate"
+  }
+ ],
+ "content": "[{\"id\": \"pfHeader01\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>المالية العامة — العراق (تجريبي) / Public Finance — Iraq (DEMO)</b></span>\", \"col\": 12}}, {\"id\": \"pfParagrph1\", \"type\": \"paragraph\", \"data\": {\"text\": \"<span class=\\\"text-muted\\\">بيانات تجريبية، غير رسمية — Demo data, not official.</span>\", \"col\": 12}}, {\"id\": \"pfChart0001\", \"type\": \"chart\", \"data\": {\"chart_name\": \"استهلاك الميزانية حسب الوزارة / Budget Consumption by Ministry\", \"col\": 6}}, {\"id\": \"pfChart0002\", \"type\": \"chart\", \"data\": {\"chart_name\": \"التحصيلات حسب المحافظة / Collections by Governorate\", \"col\": 6}}, {\"id\": \"pfSpacer001\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"pfHeader02\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>الاختصارات / Shortcuts</b></span>\", \"col\": 12}}, {\"id\": \"pfShort0001\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"الميزانية / Budget\", \"col\": 3}}, {\"id\": \"pfShort0002\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"الوزارات / Ministry\", \"col\": 3}}, {\"id\": \"pfShort0003\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"المحافظات / Governorate\", \"col\": 3}}, {\"id\": \"pfShort0004\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"فاتورة الشراء / Purchase Invoice\", \"col\": 3}}, {\"id\": \"pfShort0005\", \"type\": \"shortcut\", \"data\": {\"shortcut_name\": \"قيد الدفع / Payment Entry\", \"col\": 3}}, {\"id\": \"pfSpacer002\", \"type\": \"spacer\", \"data\": {\"col\": 12}}, {\"id\": \"pfHeader03\", \"type\": \"header\", \"data\": {\"text\": \"<span class=\\\"h4\\\"><b>التقارير / Reports</b></span>\", \"col\": 12}}, {\"id\": \"pfCard00001\", \"type\": \"card\", \"data\": {\"card_name\": \"تقارير الميزانية / Budget Reports\", \"col\": 4}}, {\"id\": \"pfCard00002\", \"type\": \"card\", \"data\": {\"card_name\": \"الإعدادات / Masters\", \"col\": 4}}]",
+ "creation": "2026-10-08 02:00:00.000000",
+ "custom_blocks": [],
+ "docstatus": 0,
+ "doctype": "Workspace",
+ "for_user": "",
+ "hide_custom": 0,
+ "icon": "accounting",
+ "idx": 0,
+ "indicator_color": "",
+ "is_hidden": 0,
+ "label": "Public Finance Iraq",
+ "links": [
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "تقارير الميزانية / Budget Reports",
+   "link_count": 2,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "dependencies": "Budget",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "الالتزامات مقابل الفعلي / Budget Commitment vs Actual",
+   "link_count": 0,
+   "link_to": "Budget Commitment vs Actual",
+   "link_type": "Report",
+   "onboard": 1,
+   "type": "Link"
+  },
+  {
+   "dependencies": "Budget",
+   "hidden": 0,
+   "is_query_report": 1,
+   "label": "تقرير انحراف الميزانية / Budget Variance Report",
+   "link_count": 0,
+   "link_to": "Budget Variance Report",
+   "link_type": "Report",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "الإعدادات / Masters",
+   "link_count": 3,
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Card Break"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "الأبعاد المحاسبية / Accounting Dimension",
+   "link_count": 0,
+   "link_to": "Accounting Dimension",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "الوزارات / Ministry",
+   "link_count": 0,
+   "link_to": "Ministry",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  },
+  {
+   "hidden": 0,
+   "is_query_report": 0,
+   "label": "المحافظات / Governorate",
+   "link_count": 0,
+   "link_to": "Governorate",
+   "link_type": "DocType",
+   "onboard": 0,
+   "type": "Link"
+  }
+ ],
+ "modified": "2026-10-08 02:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "Accounts",
+ "name": "Public Finance Iraq",
+ "number_cards": [],
+ "owner": "Administrator",
+ "parent_page": "Accounting",
+ "public": 1,
+ "quick_lists": [],
+ "restrict_to_domain": "",
+ "roles": [],
+ "sequence_id": 6.0,
+ "shortcuts": [
+  {
+   "color": "Blue",
+   "doc_view": "List",
+   "label": "الميزانية / Budget",
+   "link_to": "Budget",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "الوزارات / Ministry",
+   "link_to": "Ministry",
+   "type": "DocType"
+  },
+  {
+   "color": "Green",
+   "doc_view": "List",
+   "label": "المحافظات / Governorate",
+   "link_to": "Governorate",
+   "type": "DocType"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "List",
+   "label": "فاتورة الشراء / Purchase Invoice",
+   "link_to": "Purchase Invoice",
+   "type": "DocType"
+  },
+  {
+   "color": "Orange",
+   "doc_view": "List",
+   "label": "قيد الدفع / Payment Entry",
+   "link_to": "Payment Entry",
+   "type": "DocType"
+  }
+ ],
+ "title": "المالية العامة — العراق (تجريبي)",
+ "type": "Workspace"
+}
