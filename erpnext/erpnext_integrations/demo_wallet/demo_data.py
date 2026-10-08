@@ -62,7 +62,8 @@ def setup(seed_transactions=True):
 
 
 def legacy_seed_exists(amount, state):
-	"""Recognise rows seeded before markers existed: same company, amount and gateway status, no marker."""
+	"""Recognise rows seeded before markers existed: a transaction raised by this seeder's own demo
+	customer/invoice with the scenario's amount and gateway status, and no marker yet."""
 	status = {
 		"Not Paid": "Created",
 		"Missing Payment Entry": "Paid",
@@ -73,7 +74,14 @@ def legacy_seed_exists(amount, state):
 		amount = amount + 2500  # seed_transaction bumps the gateway amount to create the mismatch
 	return frappe.db.exists(
 		"Demo Wallet Transaction",
-		{"company": COMPANY, "amount": amount, "status": status, "description": ("is", "not set")},
+		{
+			"company": COMPANY,
+			"customer_name": CUSTOMER,
+			"reference_doctype": "Sales Invoice",
+			"amount": amount,
+			"status": status,
+			"description": ("is", "not set"),
+		},
 	)
 
 
