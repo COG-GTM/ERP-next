@@ -1,7 +1,6 @@
 # Copyright (c) 2026, Frappe Technologies Pvt. Ltd. and Contributors
 # License: GNU General Public License v3. See license.txt
 
-import json
 import os
 import re
 
@@ -115,9 +114,7 @@ def update_itemised_tax_data(doc):
 
 def get_governorates() -> list[dict]:
 	"""Return the 18 Iraqi governorates (EN name + AR name) from governorates.json."""
-	path = os.path.join(os.path.dirname(__file__), "governorates.json")
-	with open(path, encoding="utf-8") as f:
-		return json.load(f)
+	return frappe.get_file_json(os.path.join(os.path.dirname(__file__), "governorates.json"))
 
 
 def get_root_territory() -> str:
