@@ -26,6 +26,7 @@ from frappe.utils import cint, flt, get_url, now_datetime, nowdate
 from erpnext.erpnext_integrations.demo_wallet import gateway
 
 SIGNATURE_HEADER = "X-Demo-Wallet-Signature"
+TOKEN_HEADER = "X-Demo-Wallet-Token"
 EVENT_SUCCEEDED = "payment.succeeded"
 EVENT_FAILED = "payment.failed"
 CHECKOUT_PATH = "/demo_wallet_checkout"
@@ -77,12 +78,12 @@ def issue_access_token(settings) -> dict:
 
 
 def require_bearer_token(settings, access_token: str | None = None) -> dict:
-	"""Accept ``Authorization: Bearer <token>`` or the RFC 6750 ``access_token`` form parameter."""
+	"""Accept the token as the RFC 6750 ``access_token`` form/query parameter or in the
+	``X-Demo-Wallet-Token`` header. (``Authorization: Bearer`` is consumed by Frappe's own OAuth
+	middleware before the endpoint runs, so the mock gateway cannot use it.)"""
 	token = access_token
 	if not token and getattr(frappe.local, "request", None):
-		scheme, _sep, value = frappe.get_request_header("Authorization", "").partition(" ")
-		if scheme.lower() == "bearer":
-			token = value.strip()
+		token = (frappe.get_request_header(TOKEN_HEADER, "") or "").strip()
 	if not token:
 		_unauthorized("invalid_request", "Missing bearer token")
 
