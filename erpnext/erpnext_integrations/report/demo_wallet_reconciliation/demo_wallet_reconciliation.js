@@ -26,7 +26,15 @@ frappe.query_reports["Demo Wallet Reconciliation"] = {
 			fieldname: "status",
 			label: __("Reconciliation Status"),
 			fieldtype: "Select",
-			options: ["", "Matched", "Missing Payment Entry", "Amount Mismatch", "Refunded", "Not Paid"],
+			options: [
+				"",
+				"Matched",
+				"Missing Payment Entry",
+				"Amount Mismatch",
+				"Refunded",
+				"Refund Not Posted",
+				"Not Paid",
+			],
 		},
 	],
 	formatter(value, row, column, data, default_formatter) {

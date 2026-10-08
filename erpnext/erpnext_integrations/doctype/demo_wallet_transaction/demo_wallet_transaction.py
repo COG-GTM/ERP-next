@@ -49,11 +49,18 @@ class DemoWalletTransaction(Document):
 
 
 @frappe.whitelist()
-def refund_from_desk(payment_id: str, amount=None, reason: str | None = None):
+def refund_from_desk(payment_id: str, amount: float | str | None = None, reason: str | None = None):
 	"""Desk button: same as the ``refund`` API, but authorised by the logged-in user's role."""
 	from erpnext.erpnext_integrations.demo_wallet.api import get_transaction, refund_transaction
 
 	frappe.only_for(("System Manager", "Accounts Manager"))
-	transaction = refund_transaction(get_transaction(payment_id), amount, reason)
+	transaction = get_transaction(payment_id)
+	if not frappe.has_permission("Payment Entry", "create", doc=None, user=frappe.session.user) or not (
+		frappe.has_permission("Demo Wallet Transaction", "write", doc=transaction)
+	):
+		frappe.throw(
+			_("Not permitted to refund Demo Wallet payment {0}").format(payment_id), frappe.PermissionError
+		)
+	transaction = refund_transaction(transaction, amount, reason)
 	frappe.msgprint(_("DEMO refund {0} recorded").format(transaction.refund_id), alert=True)
 	return transaction.as_dict()

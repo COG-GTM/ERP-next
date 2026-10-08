@@ -11,6 +11,7 @@ DEMO credentials, and seeds Demo Wallet Transactions in every reconciliation sta
 """
 
 import frappe
+from frappe import _
 from frappe.utils import flt
 
 from erpnext.accounts.doctype.payment_request.payment_request import make_payment_request
@@ -47,6 +48,9 @@ def setup(seed_transactions=True):
 	ensure_settings(company)
 	ensure_customer()
 	ensure_item()
+	if seed_transactions and frappe.db.exists("Demo Wallet Transaction", {"company": COMPANY}):
+		# idempotent: the seven scenario transactions already exist, do not duplicate invoices/ledger entries
+		seed_transactions = False
 	if seed_transactions:
 		for amount, state in SEED:
 			seed_transaction(amount, state)
@@ -177,7 +181,7 @@ def make_demo_payment_request(amount):
 		{"payment_gateway": "Demo Wallet", "company": COMPANY, "currency": CURRENCY},
 	)
 	if not gateway_account:
-		frappe.throw(f"No Demo Wallet Payment Gateway Account for {COMPANY} in {CURRENCY}")
+		frappe.throw(_("No Demo Wallet Payment Gateway Account for {0} in {1}").format(COMPANY, CURRENCY))
 	payment_request = make_payment_request(
 		dt="Sales Invoice",
 		dn=invoice.name,
