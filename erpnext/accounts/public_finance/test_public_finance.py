@@ -247,3 +247,21 @@ class TestPublicFinance(ERPNextTestSuite):
 		)
 		self.assertTrue({c.governorate for c in collections} >= set(DEMO_COLLECTIONS))
 		self.assertTrue(all(c.base_received_amount > 0 for c in collections))
+
+	def test_direct_disbursement_excludes_po_advances_and_invoice_allocations(self):
+		from erpnext.accounts.public_finance.budget_control import get_direct_disbursement
+
+		pe = frappe.get_doc(
+			{
+				"doctype": "Payment Entry",
+				"paid_amount": 100,
+				"base_paid_amount": 200,
+				"references": [
+					{"reference_doctype": "Purchase Order", "allocated_amount": 60},
+					{"reference_doctype": "Purchase Invoice", "allocated_amount": 30},
+				],
+			}
+		)
+		self.assertEqual(get_direct_disbursement(pe), 20.0)
+		pe.references[0].allocated_amount = 100
+		self.assertEqual(get_direct_disbursement(pe), 0.0)

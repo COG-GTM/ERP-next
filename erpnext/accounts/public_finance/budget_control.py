@@ -257,15 +257,9 @@ def validate_purchase_invoice_budget(doc, method=None):
 			key = (dim.document_type, value, item.expense_account)
 			requested[key] = flt(requested.get(key)) + flt(item.base_net_amount)
 			if item.get("po_detail"):
-				po_item = frappe.db.get_value(
-					"Purchase Order Item", item.po_detail, [dim.fieldname, "expense_account"], as_dict=True
-				)
-				if (
-					po_item
-					and po_item.get(dim.fieldname) == value
-					and po_item.expense_account == item.expense_account
-				):
-					already_committed[key] = flt(already_committed.get(key)) + flt(item.base_net_amount)
+				released = get_released_po_commitment(item, dim.fieldname, value)
+				if released:
+					already_committed[key] = flt(already_committed.get(key)) + released
 
 	for (dimension, value, account), amount in requested.items():
 		rows = get_commitment_vs_actual(
@@ -284,15 +278,38 @@ def validate_purchase_invoice_budget(doc, method=None):
 		raise_if_exceeded(doc.company, dimension, value, row, committed, amount)
 
 
+def get_released_po_commitment(item, fieldname, value):
+	"""Commitment (company currency, at the PO's own exchange rate) that billing this invoice row releases.
+
+	Only counted when the linked PO row carries the same dimension value and expense account, and capped
+	at the PO row's remaining unbilled amount so a mismatched or over-billed PO cannot free unrelated budget.
+	"""
+	po_item = frappe.db.get_value(
+		"Purchase Order Item",
+		item.po_detail,
+		[fieldname, "expense_account", "parent", "amount", "billed_amt"],
+		as_dict=True,
+	)
+	if not po_item or po_item.get(fieldname) != value or po_item.expense_account != item.expense_account:
+		return 0.0
+	po_rate = flt(frappe.db.get_value("Purchase Order", po_item.parent, "conversion_rate")) or 1.0
+	remaining = max(flt(po_item.amount) - flt(po_item.billed_amt), 0.0)
+	return min(flt(item.net_amount), remaining) * po_rate
+
+
 def get_direct_disbursement(pe):
-	"""Part of a supplier payment not allocated against a Purchase Invoice (company currency)."""
-	allocated_to_invoices = sum(
+	"""Part of a supplier payment not allocated against a Purchase Invoice or Purchase Order (company currency).
+
+	Allocations to a Purchase Invoice are already in Actual; advances allocated to a Purchase Order are already
+	in Committed (``get_committed_amounts``), so neither consumes additional budget here.
+	"""
+	allocated = sum(
 		flt(ref.allocated_amount)
 		for ref in (pe.get("references") or [])
-		if ref.reference_doctype == "Purchase Invoice"
+		if ref.reference_doctype in ("Purchase Invoice", "Purchase Order")
 	)
 	rate = flt(pe.base_paid_amount) / flt(pe.paid_amount) if flt(pe.paid_amount) else 1.0
-	return max(flt(pe.base_paid_amount) - allocated_to_invoices * rate, 0.0)
+	return max(flt(pe.base_paid_amount) - allocated * rate, 0.0)
 
 
 def get_prior_direct_disbursements(company, fieldname, value, fiscal_year, exclude=None):
