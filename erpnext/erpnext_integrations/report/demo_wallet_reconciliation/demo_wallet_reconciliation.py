@@ -205,17 +205,17 @@ def build_row(d):
 def reconciliation_status(d, ledger_amount):
 	if d.gateway_status == REFUNDED:
 		return REFUNDED if d.refund_payment_entry and d.refund_entry_docstatus == 1 else REFUND_NOT_POSTED
-	if d.gateway_status == "Paid" and flt(d.refund_amount):
-		# partially refunded: still Paid for further refunds, latest reversing entry must be posted
-		return (
-			PARTIALLY_REFUNDED
-			if d.refund_payment_entry and d.refund_entry_docstatus == 1
-			else REFUND_NOT_POSTED
-		)
 	if d.gateway_status != "Paid":
 		return NOT_PAID
 	if not ledger_amount:
 		return MISSING_PAYMENT_ENTRY
 	if flt(d.gateway_amount, 2) != flt(ledger_amount, 2):
 		return AMOUNT_MISMATCH
+	if flt(d.refund_amount):
+		# partially refunded: still Paid for further refunds, latest reversing entry must be posted
+		return (
+			PARTIALLY_REFUNDED
+			if d.refund_payment_entry and d.refund_entry_docstatus == 1
+			else REFUND_NOT_POSTED
+		)
 	return MATCHED

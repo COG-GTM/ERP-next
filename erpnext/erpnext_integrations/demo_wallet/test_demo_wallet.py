@@ -321,6 +321,7 @@ class TestDemoWallet(ERPNextTestSuite):
 		self.assertEqual(transaction.status, "Failed")
 		self.assertFalse(transaction.payment_entry)
 		self.assertEqual(frappe.db.get_value("Payment Request", pr.name, "status"), "Failed")
+		self.assertTrue(frappe.db.get_value("Payment Request", pr.name, "failed_reason"))
 
 		# a failed attempt is final: a later signed "success" for the same payment id is a replay
 		body = self.callback_body(transaction)
@@ -364,10 +365,16 @@ class TestDemoWallet(ERPNextTestSuite):
 					refund_amount=40,
 					refund_payment_entry=first.refund_payment_entry,
 					refund_entry_docstatus=1,
+					gateway_amount=100,
 				),
 				100,
 			),
 			PARTIALLY_REFUNDED,
+		)
+		# a cancelled original receipt still surfaces as a discrepancy
+		self.assertEqual(
+			reconciliation_status(frappe._dict(gateway_status="Paid", refund_amount=40), 0),
+			"Missing Payment Entry",
 		)
 		self.assertRaises(frappe.ValidationError, api.refund_transaction, transaction, 61, "DEMO too much")
 		first_refund_id = first.refund_id

@@ -391,7 +391,9 @@ def _mark_payment_request_failed(transaction: Document):
 		"Partially Paid",
 		"Cancelled",
 	):
-		payment_request.db_set("status", "Failed")
+		payment_request.db_set(
+			{"status": "Failed", "failed_reason": _("Declined by the DEMO wallet (simulated)")}
+		)
 
 
 @frappe.whitelist(allow_guest=True)  # nosemgrep

@@ -32,6 +32,7 @@ frappe.query_reports["Demo Wallet Reconciliation"] = {
 				"Missing Payment Entry",
 				"Amount Mismatch",
 				"Refunded",
+				"Partially Refunded",
 				"Refund Not Posted",
 				"Not Paid",
 			],
@@ -45,6 +46,7 @@ frappe.query_reports["Demo Wallet Reconciliation"] = {
 				"Missing Payment Entry": "red",
 				"Amount Mismatch": "orange",
 				Refunded: "blue",
+				"Partially Refunded": "blue",
 				"Not Paid": "gray",
 			};
 			value = `<span class="indicator-pill ${colors[data.reconciliation_status] || "gray"}">${__(
