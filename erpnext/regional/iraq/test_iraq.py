@@ -174,7 +174,12 @@ class TestIraq(ERPNextTestSuite):
 		self.assertIn(fmt_money(si.items[0].net_rate, 3, "IQD"), html)
 
 	def test_itemised_tax_per_row_currency_and_reset(self):
-		with self.change_settings("Selling Settings", {"allow_multiple_items": 1}):
+		with (
+			self.change_settings("Selling Settings", {"allow_multiple_items": 1}),
+			self.change_settings(
+				"Accounts Settings", {"allow_multi_currency_invoices_against_single_party_account": 1}
+			),
+		):
 			frappe.clear_cache(doctype="Selling Settings")
 			# two rows with the same item code must not be double counted; amounts are in invoice currency
 			si = make_iraq_sales_invoice(do_not_insert=True)
