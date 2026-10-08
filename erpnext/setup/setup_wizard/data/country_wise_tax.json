@@ -4062,6 +4062,26 @@
 		}
 	},
 
+	"Iraq": {
+		"DEMO - Iraq Sales Tax 10% (Deluxe/First-class Hotels and Restaurants)": {
+			"account_name": "Sales Tax 10%",
+			"tax_rate": 10.00,
+			"default": 1
+		},
+		"DEMO - Iraq Sales Tax 15% (Travel Tickets and Cars)": {
+			"account_name": "Sales Tax 15%",
+			"tax_rate": 15.00
+		},
+		"DEMO - Iraq Sales Tax 20% (Mobile Recharge Cards and Internet)": {
+			"account_name": "Sales Tax 20%",
+			"tax_rate": 20.00
+		},
+		"DEMO - Iraq Sales Tax 300% (Alcohol and Tobacco)": {
+			"account_name": "Sales Tax 300%",
+			"tax_rate": 300.00
+		}
+	},
+
 	"Ireland": {
 		"Ireland Tax": {
 			"account_name": "VAT",

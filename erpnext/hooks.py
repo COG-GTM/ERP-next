@@ -618,6 +618,10 @@ regional_overrides = {
 		"erpnext.controllers.taxes_and_totals.update_itemised_tax_data": "erpnext.regional.italy.utils.update_itemised_tax_data",
 		"erpnext.controllers.accounts_controller.validate_regional": "erpnext.regional.italy.utils.sales_invoice_validate",
 	},
+	"Iraq": {
+		"erpnext.controllers.taxes_and_totals.update_itemised_tax_data": "erpnext.regional.iraq.utils.update_itemised_tax_data",
+		"erpnext.controllers.accounts_controller.validate_regional": "erpnext.regional.iraq.utils.validate_regional",
+	},
 }
 user_privacy_documents = [
 	{
