@@ -350,6 +350,9 @@ doc_events = {
 	tuple(period_closing_doctypes): {
 		"validate": "erpnext.accounts.doctype.accounting_period.accounting_period.validate_accounting_period_on_doc_save",
 	},
+	("Customer", "Supplier", "Company"): {
+		"validate": "erpnext.regional.iraq.utils.validate_party_tax_id",
+	},
 	"Stock Entry": {
 		"on_submit": "erpnext.stock.doctype.material_request.material_request.update_completed_and_requested_qty",
 		"on_cancel": "erpnext.stock.doctype.material_request.material_request.update_completed_and_requested_qty",
@@ -385,9 +388,11 @@ doc_events = {
 		"validate": [
 			"erpnext.regional.united_arab_emirates.utils.update_grand_total_for_rcm",
 			"erpnext.regional.united_arab_emirates.utils.validate_returns",
+			"erpnext.accounts.public_finance.budget_control.validate_purchase_invoice_budget",
 		]
 	},
 	"Payment Entry": {
+		"validate": "erpnext.accounts.public_finance.budget_control.validate_payment_entry_budget",
 		"on_trash": "erpnext.regional.check_deletion_permission",
 	},
 	"Address": {
@@ -617,6 +622,10 @@ regional_overrides = {
 	"Italy": {
 		"erpnext.controllers.taxes_and_totals.update_itemised_tax_data": "erpnext.regional.italy.utils.update_itemised_tax_data",
 		"erpnext.controllers.accounts_controller.validate_regional": "erpnext.regional.italy.utils.sales_invoice_validate",
+	},
+	"Iraq": {
+		"erpnext.controllers.taxes_and_totals.update_itemised_tax_data": "erpnext.regional.iraq.utils.update_itemised_tax_data",
+		"erpnext.controllers.accounts_controller.validate_regional": "erpnext.regional.iraq.utils.validate_regional",
 	},
 }
 user_privacy_documents = [
