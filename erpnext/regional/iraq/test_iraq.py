@@ -200,6 +200,35 @@ class TestIraq(ERPNextTestSuite):
 				self.assertEqual(flt(row.tax_amount), 0.0)
 				self.assertEqual(flt(row.total_amount), flt(row.net_amount))
 
+	def test_allocate_tax_row_edge_cases(self):
+		from erpnext.regional.iraq.utils import _allocate_tax_row
+
+		def detail(net_amount, rate, amount):
+			item = frappe._dict(net_amount=net_amount, qty=1, precision=lambda field: 3)
+			return frappe._dict(item=item, rate=rate, amount=amount)
+
+		doc = frappe._dict(conversion_rate=1.0)
+
+		# zero-rated item next to a taxed one: the exempt row must get no tax
+		tax = frappe._dict(charge_type="On Net Total", tax_amount_after_discount_amount=10.0)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(100, 10, 10), detail(100, 0, 0)])]
+		self.assertEqual(allocated, [10.0, 0.0])
+
+		# fixed (Actual) charge on a balanced invoice: sale and return cancel, charge lands on the last row
+		tax = frappe._dict(charge_type="Actual", tax_amount_after_discount_amount=10.0)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(100, 0, 10), detail(-100, 0, 0)])]
+		self.assertEqual(allocated, [0.0, 10.0])
+		self.assertEqual(sum(allocated), 10.0)
+
+		# Actual charge spread by net amount (rate is not a percentage here)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(300, 0, 7.5), detail(100, 0, 2.5)])]
+		self.assertEqual(allocated, [7.5, 2.5])
+
+		# tax wiped out by a Grand Total discount stays zero on every row
+		tax = frappe._dict(charge_type="On Net Total", tax_amount_after_discount_amount=0.0)
+		allocated = [a for _, _, a in _allocate_tax_row(doc, tax, [detail(100, 10, 10), detail(100, 10, 10)])]
+		self.assertEqual(allocated, [0.0, 0.0])
+
 
 def make_iraq_company():
 	if not frappe.db.exists("Company", COMPANY):

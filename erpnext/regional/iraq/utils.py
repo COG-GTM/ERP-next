@@ -128,8 +128,8 @@ def _allocate_tax_row(doc, tax, details):
 	`_item_wise_tax_details` stores amounts in *company* currency, rounded to the base precision, so
 	dividing them by the conversion rate cannot recover the transaction amount (e.g. a USD-based
 	company invoicing IQD). Instead weight each row in the transaction currency the same way the tax
-	controller computes it (`net_amount * rate` for On Net Total / Actual, `qty * rate` for On Item
-	Quantity, converted detail for On Previous Row ...) and scale the weights with running-total
+	controller computes it (`net_amount * rate` for On Net Total, so zero-rated items get nothing,
+	`net_amount` for Actual, `qty * rate` for On Item Quantity, converted detail for On Previous Row ...) and scale the weights with running-total
 	rounding so they sum to the tax row's transaction-currency `tax_amount_after_discount_amount`
 	(sign-adjusted for "Deduct" rows; zero when a Grand Total discount wiped the tax out).
 	"""
@@ -142,8 +142,10 @@ def _allocate_tax_row(doc, tax, details):
 	for detail in details:
 		if charge_type == "On Item Quantity":
 			weight = multiplier * flt(detail.item.qty) * flt(detail.rate)
-		elif charge_type in ("On Net Total", "Actual"):
-			weight = multiplier * flt(detail.item.net_amount) * (flt(detail.rate) or 1.0)
+		elif charge_type == "On Net Total":
+			weight = multiplier * flt(detail.item.net_amount) * flt(detail.rate)
+		elif charge_type == "Actual":
+			weight = multiplier * flt(detail.item.net_amount)
 		else:
 			weight = flt(detail.amount) / conversion_rate
 		weights.append(weight)
@@ -152,9 +154,14 @@ def _allocate_tax_row(doc, tax, details):
 	weight_total = sum(weights)
 	if not weight_total and target:
 		# rounded base details carry no usable weight (tiny foreign-currency charge): spread by net amount
-		weights = [flt(detail.item.net_amount) or 1.0 for detail in details]
+		weights = [flt(detail.item.net_amount) for detail in details]
 		weight_total = sum(weights)
-	factor = target / weight_total if weight_total else 1.0
+	if not weight_total and target:
+		# net amounts cancel out (e.g. a return line offsets a sale) or are all zero: like the tax
+		# controller, book the whole fixed charge against the last item
+		weights = [0.0] * (len(details) - 1) + [1.0]
+		weight_total = 1.0
+	factor = target / weight_total if weight_total else 0.0
 
 	running_weight = running_allocated = 0.0
 	for detail, weight in zip(details, weights, strict=True):
