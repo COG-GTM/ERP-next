@@ -8,8 +8,6 @@ import frappe
 from frappe import _
 from frappe.utils import flt
 
-from erpnext.controllers.taxes_and_totals import get_itemised_tax
-
 # DEMO ASSUMPTION - NOT AN OFFICIAL SPECIFICATION.
 # Iraq's General Commission for Taxes introduced e-registration and a unified tax number, but no public
 # format specification was available to us. For this demo the number is validated as exactly 10 digits,
@@ -82,6 +80,8 @@ def validate_regional(doc):
 		return
 
 	validate_party_tax_id(doc)
+	# recompute (or reset, when every tax row was removed) the per-item tax fields
+	update_itemised_tax_data(doc)
 
 
 def update_itemised_tax_data(doc):
@@ -90,23 +90,31 @@ def update_itemised_tax_data(doc):
 	Writes the item-wise tax rate, tax amount and total onto each item row so the Iraq Tax Invoice
 	print format can show tax per line. Iraq has no VAT (only sales taxes on specific goods and
 	services), so there is no zero-rated / export handling here.
+
+	Amounts are taken per item *row* from `doc._item_wise_tax_details` (not grouped by item code, so
+	repeated item codes are not double counted) and converted from company currency to the
+	transaction currency. Rows without taxes are reset to zero.
 	"""
-	if not doc.items:
+	if not doc.get("items"):
 		return
 
-	meta = frappe.get_meta(doc.items[0].doctype)
-	if not meta.has_field("tax_rate"):
+	if not frappe.get_meta(doc.items[0].doctype).has_field("tax_rate"):
 		return
 
-	itemised_tax = get_itemised_tax(doc)
+	conversion_rate = flt(doc.get("conversion_rate")) or 1.0
+	totals = {}
+	for detail in doc.get("_item_wise_tax_details") or []:
+		item, tax = detail.get("item"), detail.get("tax")
+		if item is None or tax is None or getattr(tax, "category", None) == "Valuation":
+			continue
+		rate, amount = totals.setdefault(id(item), [0.0, 0.0])
+		totals[id(item)] = [
+			rate + flt(detail.get("rate")),
+			amount + flt(detail.get("amount")) / conversion_rate,
+		]
 
 	for row in doc.items:
-		tax_rate, tax_amount = 0.0, 0.0
-		item_code = row.item_code or row.item_name
-		for tax in (itemised_tax.get(item_code) or {}).values():
-			tax_rate += flt(tax.get("tax_rate", 0))
-			tax_amount += flt(tax.get("tax_amount", 0))
-
+		tax_rate, tax_amount = totals.get(id(row), (0.0, 0.0))
 		row.tax_rate = flt(tax_rate, row.precision("tax_rate"))
 		row.tax_amount = flt(tax_amount, row.precision("tax_amount"))
 		row.total_amount = flt(row.net_amount + row.tax_amount, row.precision("total_amount"))
