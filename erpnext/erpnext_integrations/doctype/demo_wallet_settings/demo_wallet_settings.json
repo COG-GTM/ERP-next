@@ -1,0 +1,112 @@
+{
+ "actions": [],
+ "creation": "2026-10-08 03:00:00.000000",
+ "doctype": "DocType",
+ "editable_grid": 1,
+ "engine": "InnoDB",
+ "field_order": [
+  "demo_notice",
+  "enabled",
+  "column_break_enabled",
+  "company",
+  "credentials_section",
+  "client_id",
+  "client_secret",
+  "column_break_credentials",
+  "hmac_secret",
+  "token_ttl_seconds"
+ ],
+ "fields": [
+  {
+   "fieldname": "demo_notice",
+   "fieldtype": "HTML",
+   "options": "<div class=\"alert alert-warning\" style=\"margin-bottom:0\"><b>DEMO</b> &mdash; mock payment gateway (demo data, not official). Tokens and callbacks are signed and verified inside this site; no external calls and no real money move. <span dir=\"rtl\">&#1578;&#1580;&#1585;&#1610;&#1576;&#1610; &mdash; &#1576;&#1608;&#1575;&#1576;&#1577; &#1583;&#1601;&#1593; &#1608;&#1607;&#1605;&#1610;&#1577;</span></div>"
+  },
+  {
+   "default": "0",
+   "fieldname": "enabled",
+   "fieldtype": "Check",
+   "label": "Enabled"
+  },
+  {
+   "fieldname": "column_break_enabled",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Payment Gateway Account \"Demo Wallet\" is created for this company when settings are saved",
+   "fieldname": "company",
+   "fieldtype": "Link",
+   "label": "Company",
+   "options": "Company"
+  },
+  {
+   "fieldname": "credentials_section",
+   "fieldtype": "Section Break",
+   "label": "DEMO Credentials"
+  },
+  {
+   "description": "OAuth2 client id the merchant (ERPNext) presents to the demo wallet",
+   "fieldname": "client_id",
+   "fieldtype": "Data",
+   "label": "Client ID",
+   "mandatory_depends_on": "enabled"
+  },
+  {
+   "fieldname": "client_secret",
+   "fieldtype": "Password",
+   "label": "Client Secret",
+   "mandatory_depends_on": "enabled"
+  },
+  {
+   "fieldname": "column_break_credentials",
+   "fieldtype": "Column Break"
+  },
+  {
+   "description": "Signs bearer tokens and callback bodies (X-Demo-Wallet-Signature)",
+   "fieldname": "hmac_secret",
+   "fieldtype": "Password",
+   "label": "HMAC Secret",
+   "mandatory_depends_on": "enabled"
+  },
+  {
+   "default": "300",
+   "fieldname": "token_ttl_seconds",
+   "fieldtype": "Int",
+   "label": "Token TTL (seconds)",
+   "non_negative": 1
+  }
+ ],
+ "in_create": 1,
+ "issingle": 1,
+ "links": [],
+ "modified": "2026-10-08 03:00:00.000000",
+ "modified_by": "Administrator",
+ "module": "ERPNext Integrations",
+ "name": "Demo Wallet Settings",
+ "owner": "Administrator",
+ "permissions": [
+  {
+   "create": 1,
+   "delete": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "System Manager",
+   "share": 1,
+   "write": 1
+  },
+  {
+   "create": 1,
+   "email": 1,
+   "print": 1,
+   "read": 1,
+   "role": "Accounts Manager",
+   "share": 1,
+   "write": 1
+  }
+ ],
+ "sort_field": "creation",
+ "sort_order": "DESC",
+ "states": [],
+ "track_changes": 1
+}
